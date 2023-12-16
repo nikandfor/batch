@@ -9,7 +9,7 @@ import (
 
 type (
 	Batch struct {
-		queue atomic.Int32
+		queue int32
 
 		Prepare  func(ctx context.Context) error
 		Commit   func(ctx context.Context) (interface{}, error)
@@ -50,7 +50,7 @@ func (b *Batch) Do(ctx context.Context, f func(ctx context.Context) error) (res 
 	defer b.Limit.Exit()
 	b.Limit.Enter()
 
-	b.queue.Add(1)
+	atomic.AddInt32(&b.queue, 1)
 
 	defer b.Unlock()
 	b.Lock()
@@ -80,8 +80,8 @@ func (b *Batch) Do(ctx context.Context, f func(ctx context.Context) error) (res 
 		b.err = PanicError{Panic: p} // panic overwrites error
 	}
 
-	x := b.queue.Add(-1) // will only be 0 if we are the last exiting the batch
-	b.cnt++              // count entered
+	x := atomic.AddInt32(&b.queue, -1) // will only be 0 if we are the last exiting the batch
+	b.cnt++                            // count entered
 
 	if x != 0 { // we are not the last exiting the batch, wait for others
 		b.Cond.Wait() // so wait for the last one to finish the job
