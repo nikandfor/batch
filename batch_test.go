@@ -19,28 +19,27 @@ func TestBatch(tb *testing.T) {
 	var commits, rollbacks, panics int
 	var bucket string
 
-	b := batch.New(func(ctx context.Context) (interface{}, error) {
-		commits++
+	b := &batch.Batch{
+		Commit: func(ctx context.Context) (interface{}, error) {
+			commits++
 
-		return bucket, nil
-	})
+			return bucket, nil
+		},
+		Prepare: func(ctx context.Context) error {
+			bucket = ""
 
-	b.Prepare = func(ctx context.Context) error {
-		bucket = ""
+			return nil
+		},
+		Rollback: func(ctx context.Context, err error) error {
+			rollbacks++
 
-		return nil
-	}
+			return err
+		},
+		Panic: func(ctx context.Context, p interface{}) error {
+			panics++
 
-	b.Rollback = func(ctx context.Context, err error) error {
-		rollbacks++
-
-		return err
-	}
-
-	b.Panic = func(ctx context.Context, p interface{}) error {
-		panics++
-
-		return batch.PanicError{Panic: p}
+			return batch.PanicError{Panic: p}
+		},
 	}
 
 	var fail func() error
@@ -154,12 +153,12 @@ func BenchmarkBatch(tb *testing.B) {
 
 	var commits, sum int
 
-	b := batch.New(func(ctx context.Context) (interface{}, error) {
+	b := batch.Batch{Commit: func(ctx context.Context) (interface{}, error) {
 		commits++
 		sum = 0
 
 		return nil, nil
-	})
+	}}
 
 	ctx := context.Background()
 

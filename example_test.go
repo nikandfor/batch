@@ -24,8 +24,8 @@ type (
 func New() *DB {
 	d := &DB{}
 
-	d.b.Init(d.commit)
 	d.b.Prepare = d.prepare
+	d.b.Commit = d.commit
 
 	return d
 }
@@ -97,4 +97,26 @@ func (d *DB) SaveBatched(ctx context.Context, data int) error {
 
 func (tx *Tx) Reset() {
 	tx.updates = tx.updates[:0]
+}
+
+func ExampleBatch() {
+	ctx := context.Background()
+	svc := New()
+
+	const M = 3
+
+	var wg sync.WaitGroup
+
+	wg.Add(M)
+
+	for j := 0; j < M; j++ {
+		go func() {
+			defer wg.Done()
+
+			err := svc.SaveBatched(ctx, 2)
+			_ = err
+		}()
+	}
+
+	wg.Wait()
 }

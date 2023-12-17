@@ -27,17 +27,20 @@ This is all without timeouts, additional goroutines, allocations, and channels.
 ```go
 var tx int
 
-b := batch.New(func(ctx context.Context) (interface{}, error) {
-	// commit tx
-	return res, err
-})
+b := batch.Batch{
+	// Required
+	Commit: func(ctx context.Context) (interface{}, error) {
+		// commit tx
+		return res, err
+	},
 
-// Optional hooks
-b.Prepare = func(ctx context.Context) error { tx = 0; return nil }     // called in the beginning on a new batch
-b.Rollback = func(ctx context.Context, err error) error { return err } // if any worker returned error
-b.Panic = func(ctx context.Context, p interface{}) error {             // any worker panicked
-	return batch.PanicError{Panic: p} // returned to other workes
-	                                  // panicked worker gets the panic back
+	// Optional hooks
+	Prepare: func(ctx context.Context) error { tx = 0; return nil },     // called in the beginning on a new batch
+	Rollback: func(ctx context.Context, err error) error { return err }, // if any worker returned error
+	Panic: func(ctx context.Context, p interface{}) error {              // any worker panicked
+		return batch.PanicError{Panic: p} // returned to other workes
+		                                  // panicked worker gets the panic back
+	},
 }
 
 // only one of Panic, Rollback, and Commit is called (in respective priority order; panic wins, then error, commit is last)
