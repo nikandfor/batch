@@ -27,33 +27,24 @@ This is all without timeouts, additional goroutines, allocations, and channels.
 ```go
 var tx int
 
-b := batch.Batch{
+bc := batch.Controller{
 	// Required
 	Commit: func(ctx context.Context) (interface{}, error) {
 		// commit tx
 		return res, err
 	},
-
-	// Optional hooks
-	Prepare: func(ctx context.Context) error { tx = 0; return nil },     // called in the beginning on a new batch
-	Rollback: func(ctx context.Context, err error) error { return err }, // if any worker returned error
-	Panic: func(ctx context.Context, p interface{}) error {              // any worker panicked
-		return batch.PanicError{Panic: p} // returned to other workes
-		                                  // panicked worker gets the panic back
-	},
 }
-
-// only one of Panic, Rollback, and Commit is called (in respective priority order; panic wins, then error, commit is last)
 
 for j := 0; j < N; j++ {
 	go func(j int) {
-		ctx := context.WithValue(ctx, workerID{}, j) // can be accessed in Commit and other hooks
+		ctx := context.WithValue(ctx, workerID{}, j) // can be accessed in Controller.Commit
 
-		res, err := b.Do(ctx, func(ctx context.Context) error {
-			tx += j // add work to the batch
+		b := bc.Enter()
+		defer b.Exit()
 
-			return nil // commit
-		})
+		tx++ // add work to the batch
+
+		res, err := b.Commit(ctx)
 		if err != nil { // works the same as we had independent commit in each goroutine
 			_ = err
 		}
@@ -64,6 +55,6 @@ for j := 0; j < N; j++ {
 }
 ```
 
-Batch is error and panic proof which means any callback (Do, Commit, and friends) may return error or panic,
+Batch is error and panic proof which means error the user code can return error or panic in any place,
 but as soon as all workers left the batch its state is restored.
 But not the external state, it's callers responsibility to keep it consistent.
