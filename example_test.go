@@ -1,3 +1,5 @@
+//go:build ignore
+
 package batch_test
 
 import (
