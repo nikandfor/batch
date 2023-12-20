@@ -24,12 +24,11 @@ type (
 	}
 
 	Batch struct {
-		noCopy noCopy
-
 		c *Controller
 		i int
 
-		triggered bool
+		noCopy noCopy
+		state  int
 	}
 
 	PanicError struct {
@@ -39,12 +38,37 @@ type (
 	noCopy struct{}
 )
 
+const (
+	stateNew = iota
+	stateQueued
+	stateEntered
+	stateCommitted
+	stateExited
+)
+
 var (
 	ErrRollback = errors.New("rollback")
 )
 
+// Enter enters a batch.
 func (c *Controller) Enter() Batch {
 	atomic.AddInt32(&c.queue, 1)
+
+	return Batch{
+		c:     c,
+		i:     c.enter(),
+		state: stateEntered,
+	}
+}
+
+func (c *Controller) Batch() Batch {
+	return Batch{
+		c: c,
+		i: -1,
+	}
+}
+
+func (c *Controller) enter() int {
 	c.mu.Lock()
 
 	if c.cond.L == nil {
@@ -58,10 +82,69 @@ func (c *Controller) Enter() Batch {
 	atomic.AddInt32(&c.queue, -1)
 	c.cnt++
 
-	return Batch{
-		c: c,
-		i: int(c.cnt) - 1,
+	return int(c.cnt) - 1
+}
+
+func (c *Controller) exit() {
+	c.cnt++
+
+	if c.cnt == 0 {
+		c.res, c.err = nil, nil
 	}
+
+	c.mu.Unlock()
+	c.cond.Broadcast()
+}
+
+func (c *Controller) commit(ctx context.Context, err error) (interface{}, error) {
+	if err != nil || atomic.LoadInt32(&c.queue) == 0 {
+		c.cnt = -c.cnt
+
+		if ep, ok := err.(PanicError); ok {
+			c.err = err
+			panic(ep.Panic)
+		}
+
+		if err != nil {
+			c.err = err
+		} else {
+			func() {
+				defer func() {
+					if p := recover(); p != nil {
+						c.err = PanicError{Panic: p}
+					}
+				}()
+
+				c.res, c.err = c.Commit(ctx)
+			}()
+		}
+	} else {
+		c.cond.Wait()
+	}
+
+	res, err := c.res, c.err
+
+	return res, err
+}
+
+func (b *Batch) QueueUp() {
+	if b.state != stateQueued-1 {
+		panic("usage: QueueUp -> Enter -> defer Exit -> Commit/Rollback")
+	}
+
+	b.state = stateQueued
+
+	atomic.AddInt32(&b.c.queue, 1)
+}
+
+func (b *Batch) Enter() {
+	if b.state != stateEntered-1 {
+		panic("usage: QueueUp -> Enter -> defer Exit -> Commit/Rollback")
+	}
+
+	b.state = stateEntered
+
+	b.i = b.c.enter()
 }
 
 func (b *Batch) Index() int {
@@ -69,18 +152,24 @@ func (b *Batch) Index() int {
 }
 
 func (b *Batch) Exit() {
+	switch b.state {
+	case stateNew:
+		return
+	case stateQueued:
+		atomic.AddInt32(&b.c.queue, -1)
+		return
+	case stateEntered, stateCommitted:
+	case stateExited:
+		panic("usage: QueueUp -> Enter -> defer Exit -> Commit/Rollback")
+	}
+
 	defer func() {
-		b.c.cnt++
+		b.c.exit()
 
-		if b.c.cnt == 0 {
-			b.c.res, b.c.err = nil, nil
-		}
-
-		b.c.mu.Unlock()
-		b.c.cond.Broadcast()
+		b.state = stateExited
 	}()
 
-	if b.triggered {
+	if b.state == stateCommitted {
 		return
 	}
 
@@ -91,56 +180,31 @@ func (b *Batch) Exit() {
 		err = PanicError{Panic: p}
 	}
 
-	_, _ = b.commit(nil, err)
+	_, _ = b.c.commit(context.Background(), err)
 }
 
 func (b *Batch) Commit(ctx context.Context) (interface{}, error) {
-	return b.commit(ctx, nil)
+	if b.state != stateCommitted-1 {
+		panic("usage: QueueUp -> Enter -> defer Exit -> Commit/Rollback")
+	}
+
+	b.state = stateCommitted
+
+	return b.c.commit(ctx, nil)
 }
 
 func (b *Batch) Rollback(ctx context.Context, err error) (interface{}, error) {
+	if b.state != stateCommitted-1 {
+		panic("usage: QueueUp -> Enter -> defer Exit -> Commit/Rollback")
+	}
+
+	b.state = stateCommitted
+
 	if err == nil {
 		err = ErrRollback
 	}
 
-	return b.commit(ctx, err)
-}
-
-func (b *Batch) commit(ctx context.Context, err error) (interface{}, error) {
-	if b.triggered {
-		panic("usage: Enter -> defer Exit -> optional Commit with err or nil")
-	}
-
-	b.triggered = true
-
-	if err != nil || atomic.LoadInt32(&b.c.queue) == 0 {
-		b.c.cnt = -b.c.cnt
-
-		if ep, ok := err.(PanicError); ok {
-			b.c.err = err
-			panic(ep.Panic)
-		}
-
-		if err != nil {
-			b.c.err = err
-		} else {
-			func() {
-				defer func() {
-					if p := recover(); p != nil {
-						b.c.err = PanicError{Panic: p}
-					}
-				}()
-
-				b.c.res, b.c.err = b.c.Commit(ctx)
-			}()
-		}
-	} else {
-		b.c.cond.Wait()
-	}
-
-	res, err := b.c.res, b.c.err
-
-	return res, err
+	return b.c.commit(ctx, err)
 }
 
 func (e PanicError) Error() string {

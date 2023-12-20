@@ -24,7 +24,7 @@ This is all without timeouts, additional goroutines, allocations, and channels.
 
 ## Usage
 
-```go
+```
 var tx int
 
 bc := batch.Controller{
@@ -42,6 +42,10 @@ for j := 0; j < N; j++ {
 		b := bc.Enter()
 		defer b.Exit()
 
+		if b.Index() == 0 { // we are first in batch, reset it
+			tx = 0
+		}
+
 		tx++ // add work to the batch
 
 		res, err := b.Commit(ctx)
@@ -55,6 +59,31 @@ for j := 0; j < N; j++ {
 }
 ```
 
-Batch is error and panic proof which means error the user code can return error or panic in any place,
-but as soon as all workers left the batch its state is restored.
+Lower level API allows queue up in advance, before actually entering batch.
+This can be used instead of waiting for timeout for other workers to come.
+Instead workers declare itself and now they may be a bit late.
+
+```
+b := bc.Batch()
+defer b.Exit() // should be called with defer to outlive panics
+
+b.QueueUp() // now we will be waited for.
+
+// prepare data
+x := 3
+
+b.Enter() // enter syncronized section
+
+// add data to a common batch
+tx += x
+
+_, _ = b.Commit(ctx)
+
+// we are still in syncronized section until Exit is called
+```
+
+`Controller.Enter` is a shortcut for `Controller.Batch, Batch.QueueUp, Batch.Enter`.
+
+Batch is error and panic proof which means the user code can return error or panic in any place,
+but as soon as all workers left the batch its state is reset.
 But not the external state, it's callers responsibility to keep it consistent.

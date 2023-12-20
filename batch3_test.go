@@ -159,4 +159,84 @@ func TestBatch(tb *testing.T) {
 
 		reached2 = true
 	})
+
+	tb.Run("LowerAPI", func(tb *testing.T) {
+		b.Commit = func(ctx context.Context) (interface{}, error) {
+			return nil, nil
+		}
+
+		b := b.Batch()
+
+		b.QueueUp()
+
+		defer b.Exit()
+		b.Enter()
+
+		_, err := b.Commit(context.Background())
+		if err != nil {
+			tb.Errorf("commit: %v", err)
+		}
+	})
+
+	tb.Run("LowerAPIMisuse", func(tb *testing.T) {
+		b.Commit = func(ctx context.Context) (interface{}, error) {
+			return nil, nil
+		}
+
+		type testCase struct {
+			Name           string
+			SkipQueue      bool
+			DoubleQueue    bool
+			NoEnter        bool
+			CommitRollback bool
+			DoubleExit     bool
+		}
+
+		for _, tc := range []testCase{
+			{Name: "SkipQueueUp", SkipQueue: true},
+			{Name: "DoubleQueue", DoubleQueue: true},
+			{Name: "NoEnter", NoEnter: true},
+			{Name: "CommitRollback", CommitRollback: true},
+			{Name: "DoubleExit", DoubleExit: true},
+		} {
+			tc := tc
+
+			tb.Run(tc.Name, func(tb *testing.T) {
+				defer func() {
+					p := recover()
+					if p == nil {
+						tb.Errorf("expected panic")
+					}
+				}()
+
+				b := b.Batch()
+				defer b.Exit()
+
+				if !tc.SkipQueue {
+					b.QueueUp()
+				}
+				if tc.DoubleQueue {
+					b.QueueUp()
+				}
+
+				if !tc.NoEnter {
+					b.Enter()
+				}
+
+				_, err := b.Commit(context.Background())
+				if err != nil {
+					tb.Errorf("commit: %v", err)
+				}
+
+				if tc.CommitRollback {
+					_, err = b.Rollback(context.Background(), nil)
+					_ = err
+				}
+
+				if tc.DoubleExit {
+					b.Exit()
+				}
+			})
+		}
+	})
 }
