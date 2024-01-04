@@ -1,3 +1,3 @@
 module nikand.dev/go/batch
 
-go 1.15
+go 1.18
