@@ -10,7 +10,10 @@ import (
 
 type (
 	Controller[Res any] struct {
-		Commit func(ctx context.Context) (Res, error)
+		Coach  int
+		Commit func(ctx context.Context, coach int) (Res, error)
+
+		mcond *sync.Cond
 
 		queue int32 // number of goroutines waiting at the mutex
 
@@ -19,8 +22,9 @@ type (
 
 		cnt int // number of goroutines in a critical zone
 
-		res Res
-		err error
+		res   Res
+		err   error
+		ready bool
 	}
 
 	Batch[Res any] struct {
@@ -52,13 +56,18 @@ var (
 )
 
 // Enter enters a batch.
-func (c *Controller[Res]) Enter() (Batch[Res], int) {
+func (c *Controller[Res]) Enter(blocking bool) (Batch[Res], int) {
+	state := stateNew
+
 	c.queueUp()
-	i := c.enter()
+	i := c.enter(blocking)
+	if i >= 0 {
+		state = stateEntered
+	}
 
 	return Batch[Res]{
 		c:     c,
-		state: stateEntered,
+		state: state,
 	}, i
 }
 
@@ -72,11 +81,22 @@ func (c *Controller[Res]) queueUp() int {
 	return int(atomic.AddInt32(&c.queue, 1))
 }
 
-func (c *Controller[Res]) enter() int {
+func (c *Controller[Res]) enter(blocking bool) int {
 	c.mu.Lock()
 
 	if c.cond.L == nil {
 		c.cond.L = &c.mu
+	}
+
+	if c.cnt < 0 && !blocking {
+		// reset to status quo
+		i := c.cnt
+
+		atomic.AddInt32(&c.queue, -1)
+		c.cond.Broadcast()
+		c.mu.Unlock()
+
+		return i
 	}
 
 	for c.cnt < 0 {
@@ -96,38 +116,55 @@ func (c *Controller[Res]) exit() int {
 	if c.cnt == 0 {
 		var zero Res
 		c.res, c.err = zero, nil
+		c.ready = false
 	}
 
 	c.mu.Unlock()
 	c.cond.Broadcast()
 
+	if c.mcond != nil {
+		c.mcond.Broadcast()
+	}
+
 	return cnt
 }
 
 func (c *Controller[Res]) commit(ctx context.Context, err error) (Res, error) {
+again:
 	if err != nil || atomic.LoadInt32(&c.queue) == 0 {
 		c.cnt = -c.cnt
+		c.ready = true
 
 		if ep, ok := err.(PanicError); ok {
 			c.err = err
 			panic(ep.Panic)
-		}
-
-		if err != nil {
+		} else if err != nil {
 			c.err = err
 		} else {
 			func() {
+				var res Res
+				var err error
+
 				defer func() {
+					c.res, c.err = res, err
+
 					if p := recover(); p != nil {
 						c.err = PanicError{Panic: p}
 					}
 				}()
 
-				c.res, c.err = c.Commit(ctx)
+				c.mu.Unlock()
+				defer c.mu.Lock()
+
+				res, err = c.Commit(ctx, c.Coach)
 			}()
 		}
 	} else {
 		c.cond.Wait()
+
+		if !c.ready {
+			goto again
+		}
 	}
 
 	res, err := c.res, c.err
@@ -145,7 +182,7 @@ func (b *Batch[Res]) QueueUp() int {
 	return b.c.queueUp()
 }
 
-func (b *Batch[Res]) Enter() int {
+func (b *Batch[Res]) Enter(blocking bool) int {
 	if b.state == stateQueued-1 {
 		b.QueueUp()
 	}
@@ -154,9 +191,14 @@ func (b *Batch[Res]) Enter() int {
 		panic(usage)
 	}
 
-	b.state = stateEntered
+	i := b.c.enter(blocking)
+	if i >= 0 {
+		b.state = stateEntered
+	} else {
+		b.state = stateNew
+	}
 
-	return b.c.enter()
+	return i
 }
 
 func (b *Batch[Res]) Exit() (i int) {
@@ -165,6 +207,7 @@ func (b *Batch[Res]) Exit() (i int) {
 		return -1
 	case stateQueued:
 		atomic.AddInt32(&b.c.queue, -1)
+		b.c.cond.Broadcast()
 		return -1
 	case stateEntered, stateCommitted:
 	case stateExited:

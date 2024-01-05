@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"runtime"
 	"sync"
 	"testing"
+	"time"
 
 	"nikand.dev/go/batch"
 )
@@ -42,7 +44,7 @@ func TestBatch(tb *testing.T) {
 
 			var sum int
 
-			b.Commit = func(ctx context.Context) (int, error) {
+			b.Commit = func(ctx context.Context, _ int) (int, error) {
 				if tc.CommitError != nil && sum >= tc.Index {
 					return sum, tc.CommitError
 				}
@@ -65,7 +67,7 @@ func TestBatch(tb *testing.T) {
 				go func() {
 					defer wg.Done()
 
-					b, idx := b.Enter()
+					b, idx := b.Enter(true)
 
 					defer func() {
 						p := recover()
@@ -140,11 +142,11 @@ func TestBatch(tb *testing.T) {
 			}
 		}()
 
-		b.Commit = func(ctx context.Context) (int, error) {
+		b.Commit = func(ctx context.Context, _ int) (int, error) {
 			return 1, nil
 		}
 
-		b, _ := b.Enter()
+		b, _ := b.Enter(true)
 		defer b.Exit()
 
 		res, err := b.Commit(ctx)
@@ -160,25 +162,46 @@ func TestBatch(tb *testing.T) {
 	})
 
 	tb.Run("LowerAPI", func(tb *testing.T) {
-		b.Commit = func(ctx context.Context) (int, error) {
+		b.Commit = func(ctx context.Context, _ int) (int, error) {
 			return 0, nil
 		}
 
-		b := b.Batch()
+		tb.Run("BatchExit", func(tb *testing.T) {
+			b := b.Batch()
+			defer b.Exit()
+		})
 
-		b.QueueUp()
+		tb.Run("AllUsed", func(tb *testing.T) {
+			b := b.Batch()
+			defer b.Exit()
 
-		defer b.Exit()
-		b.Enter()
+			b.QueueUp()
 
-		_, err := b.Commit(context.Background())
-		if err != nil {
-			tb.Errorf("commit: %v", err)
-		}
+			b.Enter(true)
+
+			_, err := b.Commit(context.Background())
+			if err != nil {
+				tb.Errorf("commit: %v", err)
+			}
+		})
+
+		tb.Run("QueueSkipped", func(tb *testing.T) {
+			b := b.Batch()
+			defer b.Exit()
+
+			//	b.QueueUp()
+
+			b.Enter(true)
+
+			_, err := b.Commit(context.Background())
+			if err != nil {
+				tb.Errorf("commit: %v", err)
+			}
+		})
 	})
 
 	tb.Run("LowerAPIMisuse", func(tb *testing.T) {
-		b.Commit = func(ctx context.Context) (int, error) {
+		b.Commit = func(ctx context.Context, _ int) (int, error) {
 			return 0, nil
 		}
 
@@ -186,6 +209,7 @@ func TestBatch(tb *testing.T) {
 			Name           string
 			SkipQueue      bool
 			DoubleQueue    bool
+			DoubleEnter    bool
 			NoEnter        bool
 			CommitRollback bool
 			DoubleExit     bool
@@ -194,6 +218,7 @@ func TestBatch(tb *testing.T) {
 		for _, tc := range []testCase{
 			//	{Name: "SkipQueueUp", SkipQueue: true}, // it's not fine
 			{Name: "DoubleQueue", DoubleQueue: true},
+			{Name: "DoubleEnter", DoubleEnter: true},
 			{Name: "NoEnter", NoEnter: true},
 			{Name: "CommitRollback", CommitRollback: true},
 			{Name: "DoubleExit", DoubleExit: true},
@@ -219,7 +244,10 @@ func TestBatch(tb *testing.T) {
 				}
 
 				if !tc.NoEnter {
-					b.Enter()
+					b.Enter(true)
+				}
+				if tc.DoubleEnter {
+					b.Enter(true)
 				}
 
 				_, err := b.Commit(context.Background())
@@ -238,4 +266,93 @@ func TestBatch(tb *testing.T) {
 			})
 		}
 	})
+}
+
+func TestBatchNonBlocking(tb *testing.T) {
+	ctx := context.Background()
+
+	var sum int
+
+	b := batch.Controller[int]{
+		Commit: func(ctx context.Context, c int) (int, error) {
+			runtime.Gosched() // do long blocking work here
+
+			return sum, nil
+		},
+	}
+
+	var wg sync.WaitGroup
+
+	for j := 0; j < *jobs; j++ {
+		j := j
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+
+			b := b.Batch()
+
+			i := b.Enter(false)
+			if i < 0 {
+				return
+			}
+
+			defer b.Exit()
+
+			if i == 0 { // we are the first entered the new batch. prepare
+				sum = 0
+			}
+
+			sum++
+
+			if j == 1 {
+				_, _ = b.Rollback(ctx, nil)
+				return
+			}
+
+			_, _ = b.Commit(ctx)
+		}()
+	}
+
+	wg.Wait()
+}
+
+func TestDeadlock(tb *testing.T) {
+	ctx := context.Background()
+
+	var sum int
+
+	b := batch.Controller[int]{
+		Commit: func(ctx context.Context, c int) (int, error) {
+			//	log.Printf("commit sum %d", sum)
+
+			return sum, nil
+		},
+	}
+
+	var wg sync.WaitGroup
+
+	for j := 0; j < *jobs; j++ {
+		j := j
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+
+			if j == 1 {
+				b := b.Batch()
+				b.QueueUp()
+				time.Sleep(10 * time.Millisecond)
+				b.Exit()
+				return
+			}
+
+			b, _ := b.Enter(true)
+			defer b.Exit()
+
+			_, _ = b.Commit(ctx)
+		}()
+	}
+
+	wg.Wait()
 }
