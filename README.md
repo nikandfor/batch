@@ -25,28 +25,28 @@ This is all without timeouts, additional goroutines, allocations, and channels.
 ## Usage
 
 ```
-var tx int
+var sum int
 
-bc := batch.Controller{
+bc := batch.Controller[int]{
 	// Required
-	Commit: func(ctx context.Context) (interface{}, error) {
-		// commit tx
-		return res, err
+	Commit: func(ctx context.Context) (int, error) {
+		// commit sum
+		return sum, err
 	},
 }
 
 for j := 0; j < N; j++ {
 	go func(j int) {
-		ctx := context.WithValue(ctx, workerID{}, j) // can be accessed in Controller.Commit
+		ctx := context.WithValue(ctx, workerID{}, j) // can be obtained in Controller.Commit
 
-		b := bc.Enter()
+		b, i := bc.Enter(true)
 		defer b.Exit()
 
-		if b.Index() == 0 { // we are first in batch, reset it
-			tx = 0
+		if i == 0 { // we are first in batch, reset it
+			sum = 0 // or you can do in in the end of commit function
 		}
 
-		tx++ // add work to the batch
+		sum++ // add work to the batch
 
 		res, err := b.Commit(ctx)
 		if err != nil { // works the same as we had independent commit in each goroutine
@@ -72,10 +72,10 @@ b.QueueUp() // now we will be waited for.
 // prepare data
 x := 3
 
-b.Enter() // enter syncronized section
+b.Enter(true) // enter syncronized section
 
 // add data to a common batch
-tx += x
+sum += x
 
 _, _ = b.Commit(ctx)
 
