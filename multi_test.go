@@ -23,6 +23,7 @@ func TestMulti(tb *testing.T) {
 	var wg sync.WaitGroup
 
 	for j := 0; j < *jobs; j++ {
+		j := j
 		wg.Add(1)
 
 		go func() {
