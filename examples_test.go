@@ -12,7 +12,7 @@ import (
 
 var coaches = flag.Int("coaches", 2, "parallel coaches")
 
-func ExampleControllerBlocking() {
+func ExampleController_blocking() {
 	ctx := context.Background()
 
 	var sum int
@@ -63,7 +63,7 @@ func ExampleControllerBlocking() {
 	// Output:
 }
 
-func ExampleControllerNonBlocking() {
+func ExampleController_nonBlocking() {
 	ctx := context.Background()
 
 	var sum int
@@ -124,7 +124,7 @@ func ExampleControllerNonBlocking() {
 	// Output:
 }
 
-func ExampleMultiBlocking() {
+func ExampleMulti_blocking() {
 	ctx := context.Background()
 
 	sum := make([]int, *coaches)
@@ -174,7 +174,7 @@ func ExampleMultiBlocking() {
 	// Output:
 }
 
-func ExampleMultiNonBlocking() {
+func ExampleMulti_nonBlocking() {
 	ctx := context.Background()
 
 	sum := make([]int, *coaches)
