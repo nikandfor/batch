@@ -216,12 +216,12 @@ func TestBatch(tb *testing.T) {
 		}
 
 		for _, tc := range []testCase{
-			//	{Name: "SkipQueueUp", SkipQueue: true}, // it's not fine
+			//	{Name: "SkipQueueUp", SkipQueue: true}, // it's fine now
 			{Name: "DoubleQueue", DoubleQueue: true},
 			{Name: "DoubleEnter", DoubleEnter: true},
 			{Name: "NoEnter", NoEnter: true},
 			{Name: "CommitRollback", CommitRollback: true},
-			{Name: "DoubleExit", DoubleExit: true},
+			//	{Name: "DoubleExit", DoubleExit: true}, // it's fine now
 		} {
 			tc := tc
 

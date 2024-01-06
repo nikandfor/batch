@@ -46,9 +46,9 @@ const (
 	stateQueued
 	stateEntered
 	stateCommitted
-	stateExited
+	//	stateExited
 
-	usage = "usage: QueueUp -> Enter -> defer Exit -> Commit/Rollback"
+	usage = "usage: [QueueUp ->] Enter -> defer Exit -> Commit/Rollback"
 )
 
 var (
@@ -216,14 +216,15 @@ func (b *Batch[Res]) Exit() (i int) {
 		b.c.cond.Broadcast()
 		return -1
 	case stateEntered, stateCommitted:
-	case stateExited:
-		panic(usage)
+		//	case stateExited:
+		//		panic(usage)
 	}
 
 	defer func() {
 		i = b.c.exit()
 
-		b.state = stateExited
+		//	b.state = stateExited
+		b.state = stateNew
 	}()
 
 	if b.state == stateCommitted {
