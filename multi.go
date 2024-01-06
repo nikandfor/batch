@@ -40,7 +40,10 @@ func (c *Multi[Res]) Enter(blocking bool) (b Batch[Res], coach, index int) {
 		for coach := range c.cs {
 			b, idx := c.cs[coach].Enter(false)
 			if idx >= 0 {
-				return b, coach, idx
+				return Batch[Res]{
+					c:     b.c,
+					state: b.state,
+				}, coach, idx
 			}
 		}
 

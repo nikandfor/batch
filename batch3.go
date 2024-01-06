@@ -133,13 +133,14 @@ func (c *Controller[Res]) commit(ctx context.Context, err error) (Res, error) {
 again:
 	if err != nil || atomic.LoadInt32(&c.queue) == 0 {
 		c.cnt = -c.cnt
-		c.ready = true
 
 		if ep, ok := err.(PanicError); ok {
 			c.err = err
+			c.ready = true
 			panic(ep.Panic)
 		} else if err != nil {
 			c.err = err
+			c.ready = true
 		} else {
 			func() {
 				var res Res
@@ -147,6 +148,7 @@ again:
 
 				defer func() {
 					c.res, c.err = res, err
+					c.ready = true
 
 					if p := recover(); p != nil {
 						c.err = PanicError{Panic: p}
@@ -160,10 +162,14 @@ again:
 			}()
 		}
 	} else {
+	wait:
 		c.cond.Wait()
 
-		if !c.ready {
+		if c.cnt > 0 {
 			goto again
+		}
+		if !c.ready {
+			goto wait
 		}
 	}
 
@@ -260,8 +266,15 @@ func (b *Batch[Res]) Rollback(ctx context.Context, err error) (Res, error) {
 	return b.c.commit(ctx, err)
 }
 
+func AsPanicError(err error) (PanicError, bool) {
+	var pe PanicError
+
+	return pe, errors.As(err, &pe)
+}
+
 func (e PanicError) Error() string {
 	return fmt.Sprintf("panic: %v", e.Panic)
 }
 
-func (noCopy) Lock() {}
+func (*noCopy) Lock()   {}
+func (*noCopy) Unlock() {}

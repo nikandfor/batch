@@ -266,6 +266,48 @@ func TestBatch(tb *testing.T) {
 			})
 		}
 	})
+
+	tb.Run("okAfterAll", func(tb *testing.T) {
+		const N = 100
+
+		ctx := context.Background()
+
+		var sum int
+
+		b.Commit = func(ctx context.Context, _ int) (int, error) {
+			runtime.Gosched()
+			return sum, nil
+		}
+
+		var wg sync.WaitGroup
+
+		wg.Add(*jobs)
+
+		for j := 0; j < *jobs; j++ {
+			go func() {
+				defer wg.Done()
+
+				for i := 0; i < N; i++ {
+					func() {
+						b, idx := b.Enter(true)
+						defer b.Exit()
+
+						if idx == 0 {
+							sum = 0
+						}
+
+						runtime.Gosched()
+						sum++
+						runtime.Gosched()
+
+						_, _ = b.Commit(ctx)
+					}()
+				}
+			}()
+		}
+
+		wg.Wait()
+	})
 }
 
 func TestBatchNonBlocking(tb *testing.T) {
