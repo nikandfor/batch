@@ -83,6 +83,8 @@ func TestCoordinatorAllCases(tb *testing.T) {
 				panic("commit PaNiC")
 			}
 
+			runtime.Gosched()
+
 			tb.Logf("commit %v", sum)
 			return sum, nil
 		},

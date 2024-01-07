@@ -22,6 +22,8 @@ func TestMulti(tb *testing.T) {
 			panic("commit PaNiC")
 		}
 
+		runtime.Gosched()
+
 		tb.Logf("coach %2d  commit %2d", coach, sum[coach])
 		return sum[coach], nil
 	})
