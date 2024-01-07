@@ -55,7 +55,7 @@ for j := 0; j < N; j++ {
 
 		sum += data // add data to the batch
 
-		res, err := bc.Commit(ctx, false)
+		res, err := bc.Commit(ctx)
 		if err != nil { // works the same as we had independent commit in each goroutine
 			_ = err
 		}
