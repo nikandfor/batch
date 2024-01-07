@@ -34,7 +34,7 @@ func TestMulti(tb *testing.T) {
 				func() {
 					if i == 3 && j == 1 {
 						defer func() {
-							recover()
+							_ = recover()
 						}()
 					}
 
@@ -79,7 +79,7 @@ func TestMulti(tb *testing.T) {
 
 					res, err := bc.Commit(ctx, coach, false)
 					if err != nil {
-						//
+						_ = err
 					}
 
 					if pe, ok := batch.AsPanicError(err); ok {

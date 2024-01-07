@@ -39,8 +39,6 @@ type (
 	}
 )
 
-const usage = "QueueIn -> Enter -> defer Exit -> Commit/Cancel"
-
 var Canceled = errors.New("batch canceled")
 
 func New[Res any](f func(ctx context.Context) (Res, error)) *Coordinator[Res] {

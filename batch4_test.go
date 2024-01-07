@@ -103,7 +103,7 @@ func TestCoordinatorAllCases(tb *testing.T) {
 				func() {
 					if i == 3 && j == 1 {
 						defer func() {
-							recover()
+							_ = recover()
 						}()
 					}
 
@@ -152,7 +152,7 @@ func TestCoordinatorAllCases(tb *testing.T) {
 
 					res, err := bc.Commit(ctx, false)
 					if err != nil {
-						//
+						_ = err
 					}
 
 					if pe, ok := batch.AsPanicError(err); ok {

@@ -34,7 +34,7 @@ func (s *Service) commit(ctx context.Context) (int, error) {
 func (s *Service) DoWork(ctx context.Context, data int) (int, error) {
 	s.bc.QueueIn() // let others know we are going to join
 
-	data = data // prepare out data
+	_ = data // prepare data
 
 	idx := s.bc.Enter(true) // true for blocking, false if we want to leave instead of waiting
 	// if idx < 0 // we haven't entered the batch in non blocking mode
@@ -63,8 +63,6 @@ func (s *Service) DoWork(ctx context.Context, data int) (int, error) {
 }
 
 func ExampleCoordinator() {
-	const N = 10
-
 	s := NewService()
 
 	// let's spin up some workers
