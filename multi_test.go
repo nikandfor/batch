@@ -14,10 +14,10 @@ func TestMulti(tb *testing.T) {
 	ctx := context.Background()
 
 	var sum [2]int
-	var commitPanics bool
+	var commitPanics [2]bool
 
 	bc := batch.NewMulti(len(sum), func(ctx context.Context, coach int) (int, error) {
-		if commitPanics {
+		if commitPanics[coach] {
 			tb.Logf("commit PANICS")
 			panic("commit PaNiC")
 		}
@@ -85,7 +85,7 @@ func TestMulti(tb *testing.T) {
 					}
 
 					if j == 1 {
-						commitPanics = i == 4
+						commitPanics[coach] = i == 4
 					}
 
 					if j == 1 && i == 5 {
