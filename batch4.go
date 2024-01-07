@@ -14,11 +14,19 @@ type (
 	Coordinator[Res any] struct {
 		CommitFunc func(ctx context.Context) (Res, error)
 
+		locs
+
+		coach[Res]
+	}
+
+	locs struct {
 		queue Queue
 
 		mu   sync.Mutex
 		cond sync.Cond
+	}
 
+	coach[Res any] struct {
 		cnt int
 
 		res   Res
@@ -31,7 +39,7 @@ type (
 	}
 )
 
-const usage = "Queue.In -> Enter -> defer Exit -> Commit/Cancel"
+const usage = "QueueIn -> Enter -> defer Exit -> Commit/Cancel"
 
 var Canceled = errors.New("batch canceled")
 
@@ -102,7 +110,7 @@ func (c *Coordinator[Res]) Exit() int {
 }
 
 func (c *Coordinator[Res]) Commit(ctx context.Context, force bool) (Res, error) {
-	return c.commit(ctx, nil, force)
+	return commit[Res](ctx, &c.locs, &c.coach, nil, force, c.CommitFunc)
 }
 
 func (c *Coordinator[Res]) Cancel(ctx context.Context, err error) (Res, error) {
@@ -110,52 +118,48 @@ func (c *Coordinator[Res]) Cancel(ctx context.Context, err error) (Res, error) {
 		err = Canceled
 	}
 
-	return c.commit(ctx, err, false)
+	return commit[Res](ctx, &c.locs, &c.coach, err, false, nil)
 }
 
-func (c *Coordinator[Res]) commit(ctx context.Context, err error, force bool) (Res, error) {
+func commit[Res any](ctx context.Context, c *locs, cc *coach[Res], err error, force bool, f func(ctx context.Context) (Res, error)) (Res, error) {
 again:
 	if err != nil || force || c.queue.Len() == 0 {
-		if c.cnt <= 0 {
-			panic("inconsistent state")
-		}
-
-		c.cnt = -c.cnt
+		cc.cnt = -cc.cnt
 
 		if err != nil {
-			c.err = err
-			c.ready = true
+			cc.err = err
+			cc.ready = true
 
-			return c.res, c.err
+			return cc.res, cc.err
 		}
 
 		func() {
 			defer func() {
-				c.ready = true
+				cc.ready = true
 
 				if p := recover(); p != nil {
-					c.err = PanicError{Panic: p}
+					cc.err = PanicError{Panic: p}
 				}
 			}()
 
 			c.mu.Unlock()
 			defer c.mu.Lock()
 
-			c.res, c.err = c.CommitFunc(ctx)
+			cc.res, cc.err = f(ctx)
 		}()
 	} else {
 	wait:
 		c.cond.Wait()
 
-		if c.cnt > 0 {
+		if cc.cnt > 0 {
 			goto again
 		}
-		if !c.ready {
+		if !cc.ready {
 			goto wait
 		}
 	}
 
-	return c.res, c.err
+	return cc.res, cc.err
 }
 
 func (q *Queue) In() int {
