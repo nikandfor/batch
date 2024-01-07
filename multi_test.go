@@ -14,8 +14,14 @@ func TestMulti(tb *testing.T) {
 	ctx := context.Background()
 
 	var sum [2]int
+	var commitPanics bool
 
 	bc := batch.NewMulti(len(sum), func(ctx context.Context, coach int) (int, error) {
+		if commitPanics {
+			tb.Logf("commit PANICS")
+			panic("commit PaNiC")
+		}
+
 		tb.Logf("coach %2d  commit %2d", coach, sum[coach])
 		return sum[coach], nil
 	})
@@ -29,11 +35,11 @@ func TestMulti(tb *testing.T) {
 		go func() {
 			defer wg.Done()
 
-			for i := 0; i < 5; i++ {
+			for i := 0; i < 7; i++ {
 				i := i
 
 				func() {
-					if i == 3 && j == 1 {
+					if j == 1 && i == 3 {
 						defer func() {
 							_ = recover()
 						}()
@@ -43,7 +49,7 @@ func TestMulti(tb *testing.T) {
 
 					runtime.Gosched()
 
-					coach, idx := bc.Enter(j == 1)
+					coach, idx := bc.Enter(j == 0)
 					if idx < 0 {
 						tb.Logf("worker %2d  iter %2d  didn't enter %2d/%2d", j, i, coach, idx)
 						return
@@ -60,22 +66,30 @@ func TestMulti(tb *testing.T) {
 
 					tb.Logf("coach %2d  worker %2d  iter %2d  enters %2d", coach, j, i, idx)
 
-					if i == 1 && j == 1 {
+					if j == 1 && i == 1 {
 						tb.Logf("coach %2d  worker %2d  iter %2d  LEFT", coach, j, i)
 						return
 					}
 
 					sum[coach] += i
 
-					if i == 3 && j == 1 {
+					if j == 1 && i == 2 {
+						_, err := bc.Cancel(ctx, coach, nil)
+						tb.Logf("coach %2d  worker %2d  iter %2d  CANCEL %v", coach, j, i, err)
+						return
+					}
+
+					if j == 1 && i == 3 {
 						tb.Logf("coach %2d  worker %2d  iter %2d  PANICS", coach, j, i)
 						panic("pAnIc")
 					}
 
-					if i == 2 && j == 1 {
-						_, err := bc.Cancel(ctx, coach, nil)
-						tb.Logf("coach %2d  worker %2d  iter %2d  CANCEL %v", coach, j, i, err)
-						return
+					if j == 1 {
+						commitPanics = i == 4
+					}
+
+					if j == 1 && i == 5 {
+						bc.Trigger(coach)
 					}
 
 					res, err := bc.Commit(ctx, coach)
@@ -97,8 +111,6 @@ func TestMulti(tb *testing.T) {
 }
 
 func BenchmarkMulti(tb *testing.B) {
-	tb.ReportAllocs()
-
 	const N = 8
 
 	ctx := context.Background()
@@ -142,12 +154,14 @@ func BenchmarkMulti(tb *testing.B) {
 	}
 
 	tb.Run("Default_8", func(tb *testing.B) {
+		tb.ReportAllocs()
 		bc.Balancer = nil
 
 		tb.RunParallel(run)
 	})
 
 	tb.Run("Balancer_8", func(tb *testing.B) {
+		tb.ReportAllocs()
 		bc.Balancer = func(x []uint64) int {
 			return bits.Len64(x[0]) - 1 // choose the highest number
 		}

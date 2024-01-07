@@ -97,11 +97,11 @@ func TestCoordinatorAllCases(tb *testing.T) {
 		go func() {
 			defer wg.Done()
 
-			for i := 0; i < 6; i++ {
+			for i := 0; i < 7; i++ {
 				i := i
 
 				func() {
-					if i == 3 && j == 1 {
+					if j == 1 && i == 3 {
 						defer func() {
 							_ = recover()
 						}()
@@ -111,7 +111,7 @@ func TestCoordinatorAllCases(tb *testing.T) {
 
 					runtime.Gosched()
 
-					idx := bc.Enter(j == 1)
+					idx := bc.Enter(j == 0)
 					if idx < 0 {
 						tb.Logf("worker %2d  iter %2d  didn't enter %2d", j, i, idx)
 						return
@@ -128,26 +128,30 @@ func TestCoordinatorAllCases(tb *testing.T) {
 
 					tb.Logf("worker %2d  iter %2d  enters %2d", j, i, idx)
 
-					if i == 1 && j == 1 {
+					if j == 1 && i == 1 {
 						tb.Logf("worker %2d  iter %2d  LEFT", j, i)
 						return
 					}
 
 					sum += i
 
-					if i == 2 && j == 1 {
+					if j == 1 && i == 2 {
 						_, err := bc.Cancel(ctx, nil)
 						tb.Logf("worker %2d  iter %2d  CANCEL %v", j, i, err)
 						return
 					}
 
-					if i == 3 && j == 1 {
+					if j == 1 && i == 3 {
 						tb.Logf("worker %2d  iter %2d  PANICS", j, i)
 						panic("pAnIc")
 					}
 
 					if j == 1 {
 						commitPanics = i == 4
+					}
+
+					if j == 1 && i == 5 {
+						bc.Trigger()
 					}
 
 					res, err := bc.Commit(ctx)
@@ -174,12 +178,11 @@ func BenchmarkCoordinator(tb *testing.B) {
 	ctx := context.Background()
 
 	var sum int
+	var bc batch.Coordinator[int]
 
-	bc := batch.Coordinator[int]{
-		CommitFunc: func(ctx context.Context) (int, error) {
-			return sum, nil
-		},
-	}
+	bc.Init(func(ctx context.Context) (int, error) {
+		return sum, nil
+	})
 
 	tb.RunParallel(func(tb *testing.PB) {
 		for tb.Next() {
