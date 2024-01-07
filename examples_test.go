@@ -54,6 +54,8 @@ func (s *Service) DoWork(ctx context.Context, data int) (int, error) {
 
 	log.Printf("worker %2d got in with index %2d", ctx.Value("worker"), idx)
 
+	// if isFull() { s.bc.Trigger() } // trigger commit. we can leave or we can stay in the batch
+
 	// if notThisTime() { return } // safely leave the batch if we changed our mind. Keep the state (s.sum) unchanged.
 
 	s.sum += data // add our work to the batch
@@ -61,8 +63,8 @@ func (s *Service) DoWork(ctx context.Context, data int) (int, error) {
 	// if spoiltState() { return s.bc.Cancel(ctx, err) } // cancel the whole batch if we spoilt it
 
 	// only one of leave(return)/Cancel/Commit must be called and only once
-	res, err := s.bc.Commit(ctx, false) // true to force batch to commit now, false to wait for others
-	if err != nil {                     // batch failed, each worker in it will get the same error
+	res, err := s.bc.Commit(ctx)
+	if err != nil { // batch failed, each worker in it will get the same error
 		return 0, err
 	}
 

@@ -22,6 +22,11 @@ func NewMulti[Res any](n int, f func(ctx context.Context, coach int) (Res, error
 	}
 }
 
+func (c *Multi[Res]) Init(n int, f func(ctx context.Context, coach int) (Res, error)) {
+	c.CommitFunc = f
+	c.cs = make([]coach[Res], n)
+}
+
 func (c *Multi[Res]) Queue() *Queue {
 	return &c.locs.queue
 }
@@ -89,8 +94,12 @@ func (c *Multi[Res]) Exit(coach int) int {
 	return idx
 }
 
-func (c *Multi[Res]) Commit(ctx context.Context, coach int, force bool) (Res, error) {
-	return commit(ctx, &c.locs, &c.cs[coach], nil, force, func(ctx context.Context) (Res, error) {
+func (c *Multi[Res]) Trigger(coach int) {
+	c.cs[coach].trigger = true
+}
+
+func (c *Multi[Res]) Commit(ctx context.Context, coach int) (Res, error) {
+	return commit(ctx, &c.locs, &c.cs[coach], nil, func(ctx context.Context) (Res, error) {
 		return c.CommitFunc(ctx, coach)
 	})
 }
@@ -100,5 +109,5 @@ func (c *Multi[Res]) Cancel(ctx context.Context, coach int, err error) (Res, err
 		err = Canceled
 	}
 
-	return commit(ctx, &c.locs, &c.cs[coach], err, false, nil)
+	return commit(ctx, &c.locs, &c.cs[coach], err, nil)
 }

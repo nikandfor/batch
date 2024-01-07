@@ -52,7 +52,7 @@ func TestCoordinatorSmoke(tb *testing.T) {
 
 					sum += i
 
-					res, err := bc.Commit(ctx, false)
+					res, err := bc.Commit(ctx)
 					if err != nil {
 						tb.Errorf("commit: %v", err)
 					}
@@ -150,7 +150,7 @@ func TestCoordinatorAllCases(tb *testing.T) {
 						commitPanics = i == 4
 					}
 
-					res, err := bc.Commit(ctx, false)
+					res, err := bc.Commit(ctx)
 					if err != nil {
 						_ = err
 					}
@@ -199,7 +199,7 @@ func BenchmarkCoordinator(tb *testing.B) {
 
 				sum += 1
 
-				res, err := bc.Commit(ctx, false)
+				res, err := bc.Commit(ctx)
 				if err != nil {
 					//	tb.Errorf("commit: %v", err)
 					_ = err

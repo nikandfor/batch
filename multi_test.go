@@ -77,7 +77,7 @@ func TestMulti(tb *testing.T) {
 						return
 					}
 
-					res, err := bc.Commit(ctx, coach, false)
+					res, err := bc.Commit(ctx, coach)
 					if err != nil {
 						_ = err
 					}

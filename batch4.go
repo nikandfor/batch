@@ -29,9 +29,10 @@ type (
 	coach[Res any] struct {
 		cnt int
 
-		res   Res
-		err   error
-		ready bool
+		res     Res
+		err     error
+		ready   bool
+		trigger bool
 	}
 
 	PanicError struct {
@@ -45,6 +46,10 @@ func New[Res any](f func(ctx context.Context) (Res, error)) *Coordinator[Res] {
 	return &Coordinator[Res]{
 		CommitFunc: f,
 	}
+}
+
+func (c *Coordinator[Res]) Init(f func(ctx context.Context) (Res, error)) {
+	c.CommitFunc = f
 }
 
 func (c *Coordinator[Res]) Queue() *Queue {
@@ -109,8 +114,12 @@ func (c *Coordinator[Res]) Exit() int {
 	return idx
 }
 
-func (c *Coordinator[Res]) Commit(ctx context.Context, force bool) (Res, error) {
-	return commit[Res](ctx, &c.locs, &c.coach, nil, force, c.CommitFunc)
+func (c *Coordinator[Res]) Trigger() {
+	c.trigger = true
+}
+
+func (c *Coordinator[Res]) Commit(ctx context.Context) (Res, error) {
+	return commit[Res](ctx, &c.locs, &c.coach, nil, c.CommitFunc)
 }
 
 func (c *Coordinator[Res]) Cancel(ctx context.Context, err error) (Res, error) {
@@ -118,12 +127,12 @@ func (c *Coordinator[Res]) Cancel(ctx context.Context, err error) (Res, error) {
 		err = Canceled
 	}
 
-	return commit[Res](ctx, &c.locs, &c.coach, err, false, nil)
+	return commit[Res](ctx, &c.locs, &c.coach, err, nil)
 }
 
-func commit[Res any](ctx context.Context, c *locs, cc *coach[Res], err error, force bool, f func(ctx context.Context) (Res, error)) (Res, error) {
+func commit[Res any](ctx context.Context, c *locs, cc *coach[Res], err error, f func(ctx context.Context) (Res, error)) (Res, error) {
 again:
-	if err != nil || force || c.queue.Len() == 0 {
+	if err != nil || cc.trigger || c.queue.Len() == 0 {
 		cc.cnt = -cc.cnt
 
 		if err != nil {
