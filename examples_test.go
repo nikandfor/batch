@@ -18,6 +18,8 @@ type Service struct {
 	bc *batch.Coordinator[int] // [int] is the result value type, set to struct{} if don't need it
 }
 
+type contextKey struct{}
+
 func NewService() *Service {
 	s := &Service{}
 
@@ -52,7 +54,7 @@ func (s *Service) DoWork(ctx context.Context, data int) (int, error) {
 		log.Printf("* * * reset batch * * *")
 	}
 
-	log.Printf("worker %2d got in with index %2d", ctx.Value("worker"), idx)
+	log.Printf("worker %2d got in with index %2d", ctx.Value(contextKey{}), idx)
 
 	// if isFull() { s.bc.Trigger() } // trigger commit. we can leave or we can stay in the batch
 
@@ -68,7 +70,7 @@ func (s *Service) DoWork(ctx context.Context, data int) (int, error) {
 		return 0, err
 	}
 
-	log.Printf("worker %2d got result %v %v", ctx.Value("worker"), res, err)
+	log.Printf("worker %2d got result %v %v", ctx.Value(contextKey{}), res, err)
 
 	// if we are here, all of the workers have their work committed
 
@@ -89,7 +91,7 @@ func ExampleCoordinator() {
 			defer wg.Done()
 
 			ctx := context.Background() // passed to commit function
-			ctx = context.WithValue(ctx, "worker", j)
+			ctx = context.WithValue(ctx, contextKey{}, j)
 
 			res, err := s.DoWork(ctx, 1)
 			_, _ = res, err
