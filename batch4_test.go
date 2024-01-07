@@ -167,3 +167,48 @@ func TestCoordinatorAllCases(tb *testing.T) {
 
 	wg.Wait()
 }
+
+func BenchmarkCoordinator(tb *testing.B) {
+	tb.ReportAllocs()
+
+	ctx := context.Background()
+
+	var sum int
+
+	bc := batch.Coordinator[int]{
+		CommitFunc: func(ctx context.Context) (int, error) {
+			return sum, nil
+		},
+	}
+
+	tb.RunParallel(func(tb *testing.PB) {
+		for tb.Next() {
+			func() {
+				bc.QueueIn()
+
+				//	runtime.Gosched()
+
+				idx := bc.Enter(true)
+				defer bc.Exit()
+
+				//	tb.Logf("worker %2d  iter %2d  enters %2d", j, i, idx)
+
+				if idx == 0 {
+					sum = 0
+				}
+
+				sum += 1
+
+				res, err := bc.Commit(ctx, false)
+				if err != nil {
+					//	tb.Errorf("commit: %v", err)
+					_ = err
+				}
+
+				//	tb.Logf("worker %2d  iter %2d  res %2d %v", j, i, res, err)
+
+				_ = res
+			}()
+		}
+	})
+}

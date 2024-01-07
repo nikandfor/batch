@@ -25,9 +25,12 @@ This is all without timeouts, additional goroutines, allocations, and channels.
 ## Usage
 
 ```
+// General pattern is
+// QueueIn -> Enter -> defer Exit -> Commit/Cancel/return/panic
+
 var sum int
 
-bc := batch.Controller[int]{
+bc := batch.Coordinator[int]{
 	// Required
 	Commit: func(ctx context.Context) (int, error) {
 		// commit sum
@@ -37,18 +40,22 @@ bc := batch.Controller[int]{
 
 for j := 0; j < N; j++ {
 	go func(j int) {
-		ctx := context.WithValue(ctx, workerID{}, j) // can be obtained in Controller.Commit
+		ctx := context.WithValue(ctx, workerID{}, j) // can be obtained in Coordinator.Commit
 
-		b, i := bc.Enter(true)
-		defer b.Exit()
+		bc.QueueIn() // let others know we are going to join
 
-		if i == 0 { // we are first in batch, reset it
-			sum = 0 // or you can do in in the end of commit function
+		data := 1 // prepare data
+
+		idx := bc.Enter(true)
+		defer bc.Exit()
+
+		if idx == 0 { // we are first in the batch, reset it
+			sum = 0
 		}
 
-		sum++ // add work to the batch
+		sum += data // add data to the batch
 
-		res, err := b.Commit(ctx)
+		res, err := bc.Commit(ctx, false)
 		if err != nil { // works the same as we had independent commit in each goroutine
 			_ = err
 		}
@@ -58,31 +65,6 @@ for j := 0; j < N; j++ {
 	}(j)
 }
 ```
-
-Lower level API allows queue up in advance, before actually entering batch.
-This can be used instead of waiting for timeout for other workers to come.
-Instead workers declare itself and now they may be a bit late.
-
-```
-b := bc.Batch()
-defer b.Exit() // should be called with defer to outlive panics
-
-b.QueueUp() // now we will be waited for.
-
-// prepare data
-x := 3
-
-b.Enter(true) // enter syncronized section
-
-// add data to a common batch
-sum += x
-
-_, _ = b.Commit(ctx)
-
-// we are still in syncronized section until Exit is called
-```
-
-`Controller.Enter` is a shortcut for `Controller.Batch, Batch.QueueUp, Batch.Enter`.
 
 Batch is error and panic proof which means the user code can return error or panic in any place,
 but as soon as all workers left the batch its state is reset.
