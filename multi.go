@@ -8,6 +8,9 @@ type (
 	Multi[Res any] struct {
 		CommitFunc func(ctx context.Context, coach int) (Res, error)
 
+		Balancer  func(available []uint64) int
+		available []uint64
+
 		locs
 
 		cs []coach[Res]
@@ -41,11 +44,18 @@ func (c *Multi[Res]) Enter(blocking bool) (coach, idx int) {
 	}
 
 again:
-	for coach := range c.cs {
-		if idx := c.cs[coach].cnt; idx >= 0 {
-			c.cs[coach].cnt++
-
+	if c.Balancer != nil {
+		coach, idx := c.enterBalancer()
+		if idx >= 0 {
 			return coach, idx
+		}
+	} else {
+		for coach := range c.cs {
+			if idx := c.cs[coach].cnt; idx >= 0 {
+				c.cs[coach].cnt++
+
+				return coach, idx
+			}
 		}
 	}
 
@@ -59,6 +69,35 @@ again:
 	c.cond.Wait()
 
 	goto again
+}
+
+func (c *Multi[Res]) enterBalancer() (coach, idx int) {
+	if c.available == nil {
+		c.available = make([]uint64, (len(c.cs)+63)/64)
+	}
+
+	for i := range c.available {
+		c.available[i] = 0
+	}
+
+	for coach := range c.cs {
+		if c.cs[coach].cnt < 0 {
+			continue
+		}
+
+		i, j := coach/64, coach%64
+
+		c.available[i] |= 1 << j
+	}
+
+	coach = c.Balancer(c.available)
+	if coach < 0 || c.cs[coach].cnt < 0 {
+		return -1, -1
+	}
+
+	c.cs[coach].cnt++
+
+	return coach, c.cs[coach].cnt - 1
 }
 
 func (c *Multi[Res]) Exit(coach int) int {

@@ -2,6 +2,7 @@ package batch_test
 
 import (
 	"context"
+	"math/bits"
 	"runtime"
 	"sync"
 	"testing"
@@ -93,4 +94,64 @@ func TestMulti(tb *testing.T) {
 	}
 
 	wg.Wait()
+}
+
+func BenchmarkMulti(tb *testing.B) {
+	tb.ReportAllocs()
+
+	const N = 8
+
+	ctx := context.Background()
+
+	var sum [N]int
+	var bc batch.Multi[int]
+
+	bc.Init(N, func(ctx context.Context, coach int) (int, error) {
+		return sum[coach], nil
+	})
+
+	run := func(tb *testing.PB) {
+		for tb.Next() {
+			func() {
+				bc.Queue().In()
+
+				//	runtime.Gosched()
+
+				coach, idx := bc.Enter(true)
+				defer bc.Exit(coach)
+
+				//	tb.Logf("worker %2d  iter %2d  enters %2d", j, i, idx)
+
+				if idx == 0 {
+					sum[coach] = 0
+				}
+
+				sum[coach] += 1
+
+				res, err := bc.Commit(ctx, coach)
+				if err != nil {
+					//	tb.Errorf("commit: %v", err)
+					_ = err
+				}
+
+				//	tb.Logf("worker %2d  iter %2d  res %2d %v", j, i, res, err)
+
+				_ = res
+			}()
+		}
+	}
+
+	tb.Run("Default_8", func(tb *testing.B) {
+		bc.Balancer = nil
+
+		tb.RunParallel(run)
+	})
+
+	tb.Run("Balancer_8", func(tb *testing.B) {
+		bc.Balancer = func(x []uint64) int {
+			return bits.Len64(x[0]) - 1 // choose the highest number
+		}
+
+		tb.RunParallel(run)
+	})
 }
