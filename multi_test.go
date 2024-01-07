@@ -38,7 +38,7 @@ func TestMulti(tb *testing.T) {
 						}()
 					}
 
-					bc.QueueIn()
+					bc.Queue().In()
 
 					runtime.Gosched()
 

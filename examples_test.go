@@ -32,7 +32,7 @@ func (s *Service) commit(ctx context.Context) (int, error) {
 }
 
 func (s *Service) DoWork(ctx context.Context, data int) (int, error) {
-	s.bc.QueueIn() // let others know we are going to join
+	s.bc.Queue().In() // let others know we are going to join
 
 	_ = data // prepare data
 

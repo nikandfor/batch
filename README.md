@@ -26,7 +26,7 @@ This is all without timeouts, additional goroutines, allocations, and channels.
 
 ```
 // General pattern is
-// QueueIn -> Enter -> defer Exit -> Commit/Cancel/return/panic
+// Queue.In -> Enter -> defer Exit -> Commit/Cancel/return/panic
 
 var sum int
 
@@ -42,7 +42,7 @@ for j := 0; j < N; j++ {
 	go func(j int) {
 		ctx := context.WithValue(ctx, workerID{}, j) // can be obtained in Coordinator.Commit
 
-		bc.QueueIn() // let others know we are going to join
+		bc.Queue().In() // let others know we are going to join
 
 		data := 1 // prepare data
 

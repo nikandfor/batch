@@ -47,7 +47,9 @@ func New[Res any](f func(ctx context.Context) (Res, error)) *Coordinator[Res] {
 	}
 }
 
-func (c *Coordinator[Res]) QueueIn() { c.queue.In() }
+func (c *Coordinator[Res]) Queue() *Queue {
+	return &c.locs.queue
+}
 
 func (c *Coordinator[Res]) Enter(blocking bool) int {
 	c.mu.Lock()

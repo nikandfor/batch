@@ -37,7 +37,7 @@ func TestCoordinatorSmoke(tb *testing.T) {
 				i := i
 
 				func() {
-					bc.QueueIn()
+					bc.Queue().In()
 
 					runtime.Gosched()
 
@@ -107,7 +107,7 @@ func TestCoordinatorAllCases(tb *testing.T) {
 						}()
 					}
 
-					bc.QueueIn()
+					bc.Queue().In()
 
 					runtime.Gosched()
 
@@ -184,7 +184,7 @@ func BenchmarkCoordinator(tb *testing.B) {
 	tb.RunParallel(func(tb *testing.PB) {
 		for tb.Next() {
 			func() {
-				bc.QueueIn()
+				bc.Queue().In()
 
 				//	runtime.Gosched()
 

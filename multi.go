@@ -22,7 +22,9 @@ func NewMulti[Res any](n int, f func(ctx context.Context, coach int) (Res, error
 	}
 }
 
-func (c *Multi[Res]) QueueIn() { c.queue.In() }
+func (c *Multi[Res]) Queue() *Queue {
+	return &c.locs.queue
+}
 
 func (c *Multi[Res]) Enter(blocking bool) (coach, idx int) {
 	c.mu.Lock()
