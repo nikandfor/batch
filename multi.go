@@ -34,6 +34,10 @@ func (c *Multi[Res]) Queue() *Queue {
 	return &c.locs.queue
 }
 
+func (c *Multi[Res]) Notify() {
+	c.cond.Broadcast()
+}
+
 func (c *Multi[Res]) Enter(blocking bool) (coach, idx int) {
 	c.mu.Lock()
 

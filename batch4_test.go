@@ -99,11 +99,11 @@ func TestCoordinatorAllCases(tb *testing.T) {
 		go func() {
 			defer wg.Done()
 
-			for i := 0; i < 7; i++ {
+			for i := 0; i <= 8; i++ {
 				i := i
 
 				func() {
-					if j == 1 && i == 3 {
+					if j == 1 && (i == 3 || i == 7) {
 						defer func() {
 							_ = recover()
 						}()
@@ -113,7 +113,13 @@ func TestCoordinatorAllCases(tb *testing.T) {
 
 					runtime.Gosched()
 
-					idx := bc.Enter(j == 0)
+					if j == 1 && i == 6 {
+						bc.Queue().Out()
+						bc.Notify()
+						return
+					}
+
+					idx := bc.Enter(j != 0)
 					if idx < 0 {
 						tb.Logf("worker %2d  iter %2d  didn't enter %2d", j, i, idx)
 						return
@@ -165,6 +171,11 @@ func TestCoordinatorAllCases(tb *testing.T) {
 						tb.Logf("worker %2d  iter %2d  panic  %v", j, i, pe)
 					} else {
 						tb.Logf("worker %2d  iter %2d  res %2d %v", j, i, res, err)
+					}
+
+					if j == 1 && i == 7 {
+						tb.Logf("worker %2d  iter %2d  PANICS after commit", j, i)
+						panic("panIC")
 					}
 				}()
 			}

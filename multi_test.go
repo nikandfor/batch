@@ -37,11 +37,11 @@ func TestMulti(tb *testing.T) {
 		go func() {
 			defer wg.Done()
 
-			for i := 0; i < 7; i++ {
+			for i := 0; i <= 8; i++ {
 				i := i
 
 				func() {
-					if j == 1 && i == 3 {
+					if j == 1 && (i == 3 || i == 7) {
 						defer func() {
 							_ = recover()
 						}()
@@ -51,7 +51,13 @@ func TestMulti(tb *testing.T) {
 
 					runtime.Gosched()
 
-					coach, idx := bc.Enter(j == 0)
+					if j == 1 && i == 6 {
+						bc.Queue().Out()
+						bc.Notify()
+						return
+					}
+
+					coach, idx := bc.Enter(j != 0)
 					if idx < 0 {
 						tb.Logf("worker %2d  iter %2d  didn't enter %2d/%2d", j, i, coach, idx)
 						return
@@ -103,6 +109,11 @@ func TestMulti(tb *testing.T) {
 						tb.Logf("coach %2d  worker %2d  iter %2d  panic  %v", coach, j, i, pe)
 					} else {
 						tb.Logf("coach %2d  worker %2d  iter %2d  res %2d %v", coach, j, i, res, err)
+					}
+
+					if j == 1 && i == 7 {
+						tb.Logf("coach %2d  worker %2d  iter %2d  PANICS after commit", coach, j, i)
+						panic("panIC")
 					}
 				}()
 			}
@@ -165,7 +176,7 @@ func BenchmarkMulti(tb *testing.B) {
 	tb.Run("Balancer_8", func(tb *testing.B) {
 		tb.ReportAllocs()
 		bc.Balancer = func(x []uint64) int {
-			return bits.Len64(x[0]) - 1 // choose the highest number
+			return bits.Len64(x[0]) - 1 - 1 // highest-1 or -1
 		}
 
 		tb.RunParallel(run)

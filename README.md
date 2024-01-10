@@ -26,7 +26,7 @@ This is all without timeouts, additional goroutines, allocations, and channels.
 
 ```
 // General pattern is
-// Queue.In -> Enter -> [if idx < 0 {return}] -> defer Exit -> Commit/Cancel/return/panic
+// Queue.In -> Enter -> defer Exit -> Commit/Cancel/return/panic
 
 var sum int
 
@@ -65,6 +65,8 @@ for j := 0; j < N; j++ {
 	}(j)
 }
 ```
+
+See the all available options in the doc.
 
 Batch is error and panic proof which means the user code can return error or panic in any place,
 but as soon as all the workers left the batch its state is reset.

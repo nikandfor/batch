@@ -44,10 +44,11 @@ func (s *Service) DoWork(ctx context.Context, data int) (int, error) {
 
 	idx := s.bc.Enter(true) // true for blocking, false if we want to leave instead of waiting
 	if idx < 0 {            // we haven't entered the batch in non blocking mode
-		return 0, errors.New("not in this time") // we have to leave in that case
+		return 0, errors.New("not this time") // we have to leave in that case
 	}
 
-	defer s.bc.Exit() // it's like Mutex.Unlock. It's a pair to successful Enter. Must be called with defer to outlive panics
+	defer s.bc.Exit() // it's like Mutex.Unlock. It's a pair to successful Enter.
+	_ = 0             // Must be called with defer to outlive panics
 
 	if idx == 0 { // we are first in the batch, reset the state
 		s.sum = 0
@@ -56,15 +57,9 @@ func (s *Service) DoWork(ctx context.Context, data int) (int, error) {
 
 	log.Printf("worker %2d got in with index %2d", ctx.Value(contextKey{}), idx)
 
-	// if isFull() { s.bc.Trigger() } // trigger commit. we can leave or we can stay in the batch
-
-	// if notThisTime() { return } // safely leave the batch if we changed our mind. Keep the state (s.sum) unchanged.
-
 	s.sum += data // add our work to the batch
 
-	// if spoiltState() { return s.bc.Cancel(ctx, err) } // cancel the whole batch if we spoilt it
-
-	// only one of leave(return)/Cancel/Commit must be called and only once
+	// only one of return/Cancel/Commit must be called and only once
 	res, err := s.bc.Commit(ctx)
 	if err != nil { // batch failed, each worker in it will get the same error
 		return 0, err
