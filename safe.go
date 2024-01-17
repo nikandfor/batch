@@ -6,11 +6,11 @@ type (
 	Batch[Res any] struct {
 		c *Coordinator[Res]
 
-		noCopy noCopy
+		noCopy noCopy //nolint:unused
 		state  byte
 	}
 
-	noCopy struct{}
+	noCopy struct{} //nolint:unused
 )
 
 const (
