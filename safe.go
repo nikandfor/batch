@@ -20,7 +20,7 @@ const (
 	stateCommitted
 	stateExited = stateNew
 
-	usage = "BatchIn -> defer Exit -> [QueueIn] -> Enter -> Cancel/Commit/return"
+	usage = "By -> defer Exit -> [QueueIn] -> Enter -> Cancel/Commit/return"
 )
 
 func By[Res any](c *Coordinator[Res]) Batch[Res] {
@@ -101,3 +101,6 @@ func (b *Batch[Res]) Exit() int {
 
 	return idx
 }
+
+func (noCopy) Lock()   {}
+func (noCopy) Unlock() {}

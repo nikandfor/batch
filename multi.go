@@ -8,7 +8,7 @@ type (
 	Multi[Res any] struct {
 		CommitFunc func(ctx context.Context, coach int) (Res, error)
 
-		Balancer  func(available []uint64) int
+		Balancer  func(bitset []uint64) int
 		available []uint64
 
 		locs
