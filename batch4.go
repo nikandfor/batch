@@ -9,13 +9,15 @@ import (
 )
 
 type (
-	// Queue is a queue of waiting workers.
+	// Queue of workers waiting to Enter the batch.
 	Queue int32
 
 	// Coordinator coordinates workers to update shared state,
-	// commit it and deliver result to all participated workers.
+	// commit it, and deliver result to all participated workers.
 	Coordinator[Res any] struct {
 		// CommitFunc is called to commit shared shate.
+		//
+		// It's already called owning critical section. Enter-Exit cycle must not be called from it.
 		//
 		// Required.
 		CommitFunc func(ctx context.Context) (Res, error)
@@ -42,7 +44,7 @@ type (
 	}
 
 	// PanicError is returned to all the workers in the batch if one panicked.
-	// The panicked worker recieves panic, not an error.
+	// The panicked worker gets panic, not an error.
 	PanicError struct {
 		Panic interface{}
 	}
@@ -64,15 +66,17 @@ func (c *Coordinator[Res]) Init(f func(ctx context.Context) (Res, error)) {
 	c.CommitFunc = f
 }
 
-// Gets the queue where workers get it to be waited for.
+// Gets the queue of waitng workers.
 //
-// Worker can leave the Queue, but it must call Notify to wake up waiting workers.
+// Worker can leave the Queue before Enter,
+// but we must call Notify to wake up waiting workers.
 func (c *Coordinator[Res]) Queue() *Queue {
 	return &c.lock.queue
 }
 
 // Notify wakes up waiting workers.
-// Must be called if the worker left the queue.
+//
+// Must be called if the worker left the Queue before Enter.
 func (c *Coordinator[Res]) Notify() {
 	c.cond.Broadcast()
 }
@@ -83,9 +87,9 @@ func (c *Coordinator[Res]) Notify() {
 // It's similar to Mutex.Lock.
 // Pair method Exit must be called if Enter was successful (returned value >= 0).
 // It returns index of entered worker.
-// 0 means we are the first and we should reset the shared state.
+// 0 means we are the first in the batch and we should reset shared state.
 // If blocking == false and batch is not available negative value returned.
-// Enter also removes worker from the queue.
+// Enter also removes the worker from the queue.
 func (c *Coordinator[Res]) Enter(blocking bool) int {
 	c.mu.Lock()
 
@@ -114,9 +118,11 @@ func (c *Coordinator[Res]) Enter(blocking bool) int {
 }
 
 // Exit exits the critical section.
-// It should be called with defer just after we successfuly Enter the batch.
+// It should be called with defer just after we successfuly Entered the batch.
 // It's similar to Mutex.Unlock.
-// Retururns number of workers still in the batch (blocked in Commit/Cancel call).
+// Returns number of workers have not Exited yet.
+// 0 means we are the last exiting the batch, state can be reset here.
+// But remember the case when worker have panicked.
 func (c *Coordinator[Res]) Exit() int {
 	defer func() {
 		c.mu.Unlock()
@@ -148,14 +154,15 @@ func (c *Coordinator[Res]) Exit() int {
 	return idx
 }
 
-// Trigger triggers the batch to Commit.
-// We can call Commit or return with the error.
+// Trigger batch to Commit.
+// We can call both Commit or Exit after that.
 // If we added our data to the batch or if we didn't respectively.
+// So we will be part of the batch or not.
 func (c *Coordinator[Res]) Trigger() {
 	c.trigger = true
 }
 
-// Commit waits for the waiting workes to add its data to the batch,
+// Commit waits for the waiting workes to add their data to the batch,
 // calls Coordinator.Commit only once for the batch,
 // and returns the same shared result to all workers.
 func (c *Coordinator[Res]) Commit(ctx context.Context) (Res, error) {
