@@ -11,7 +11,7 @@ type (
 		Balancer  func(bitset []uint64) int
 		available []uint64
 
-		locs
+		lock
 
 		cs []coach[Res]
 	}
@@ -31,7 +31,7 @@ func (c *Multi[Res]) Init(n int, f func(ctx context.Context, coach int) (Res, er
 }
 
 func (c *Multi[Res]) Queue() *Queue {
-	return &c.locs.queue
+	return &c.lock.queue
 }
 
 func (c *Multi[Res]) Notify() {
@@ -142,7 +142,7 @@ func (c *Multi[Res]) Trigger(coach int) {
 }
 
 func (c *Multi[Res]) Commit(ctx context.Context, coach int) (Res, error) {
-	return commit(ctx, &c.locs, &c.cs[coach], nil, func(ctx context.Context) (Res, error) {
+	return commit(ctx, &c.lock, &c.cs[coach], nil, func(ctx context.Context) (Res, error) {
 		return c.CommitFunc(ctx, coach)
 	})
 }
@@ -152,5 +152,5 @@ func (c *Multi[Res]) Cancel(ctx context.Context, coach int, err error) (Res, err
 		err = Canceled
 	}
 
-	return commit(ctx, &c.locs, &c.cs[coach], err, nil)
+	return commit(ctx, &c.lock, &c.cs[coach], err, nil)
 }

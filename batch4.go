@@ -74,12 +74,12 @@ type (
 	Coordinator[Res any] struct {
 		CommitFunc func(ctx context.Context) (Res, error)
 
-		locs
+		lock
 
 		coach[Res]
 	}
 
-	locs struct {
+	lock struct {
 		queue Queue
 
 		mu   sync.Mutex
@@ -113,7 +113,7 @@ func (c *Coordinator[Res]) Init(f func(ctx context.Context) (Res, error)) {
 }
 
 func (c *Coordinator[Res]) Queue() *Queue {
-	return &c.locs.queue
+	return &c.lock.queue
 }
 
 func (c *Coordinator[Res]) Notify() {
@@ -183,7 +183,7 @@ func (c *Coordinator[Res]) Trigger() {
 }
 
 func (c *Coordinator[Res]) Commit(ctx context.Context) (Res, error) {
-	return commit[Res](ctx, &c.locs, &c.coach, nil, c.CommitFunc)
+	return commit[Res](ctx, &c.lock, &c.coach, nil, c.CommitFunc)
 }
 
 func (c *Coordinator[Res]) Cancel(ctx context.Context, err error) (Res, error) {
@@ -191,10 +191,10 @@ func (c *Coordinator[Res]) Cancel(ctx context.Context, err error) (Res, error) {
 		err = Canceled
 	}
 
-	return commit[Res](ctx, &c.locs, &c.coach, err, nil)
+	return commit[Res](ctx, &c.lock, &c.coach, err, nil)
 }
 
-func commit[Res any](ctx context.Context, c *locs, cc *coach[Res], err error, f func(ctx context.Context) (Res, error)) (Res, error) {
+func commit[Res any](ctx context.Context, c *lock, cc *coach[Res], err error, f func(ctx context.Context) (Res, error)) (Res, error) {
 again:
 	if err != nil || cc.trigger || c.queue.Len() == 0 {
 		cc.cnt = -cc.cnt
