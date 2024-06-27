@@ -3,34 +3,27 @@ package batch_test
 import (
 	"context"
 	"errors"
-	"flag"
 	"log"
 	"sync"
 
 	"nikand.dev/go/batch"
 )
 
-var jobs = flag.Int("jobs", 5, "parallel jobs")
+type SafeService struct {
+	sum int // state we collect to commit together
 
-type (
-	Service struct {
-		sum int // state we collect to commit together
+	bc *batch.Coordinator[int] // [int] is the result value type, set to struct{} if don't need it
+}
 
-		bc *batch.Coordinator[int] // [int] is the result value type, set to struct{} if don't need it
-	}
-
-	contextKey struct{}
-)
-
-func NewService() *Service {
-	s := &Service{}
+func NewSafeService() *SafeService {
+	s := &SafeService{}
 
 	s.bc = batch.New(s.commit)
 
 	return s
 }
 
-func (s *Service) commit(ctx context.Context) (int, error) {
+func (s *SafeService) commit(ctx context.Context) (int, error) {
 	// suppose some heavy operation here
 	// update a file or write to db
 
@@ -39,18 +32,19 @@ func (s *Service) commit(ctx context.Context) (int, error) {
 	return s.sum, nil
 }
 
-func (s *Service) DoWork(ctx context.Context, data int) (int, error) {
-	s.bc.Queue().In() // let others know we are going to join
+func (s *SafeService) DoWork(ctx context.Context, data int) (int, error) {
+	b := batch.By(s.bc)
+	defer b.Exit() // it's like Mutex.Unlock, but safely works even if we didn't enter
+	_ = 0          // Must be called with defer to outlive panics
+
+	b.QueueIn() // let others know we are going to join
 
 	_ = data // prepare data
 
-	idx := s.bc.Enter(true) // true for blocking, false if we want to leave instead of waiting
-	if idx < 0 {            // we haven't entered the batch in non blocking mode
+	idx := b.Enter(true) // true for blocking, false if we want to leave instead of waiting
+	if idx < 0 {         // we haven't entered the batch in non blocking mode
 		return 0, errors.New("not this time") // we have to leave in that case
 	}
-
-	defer s.bc.Exit() // it's like Mutex.Unlock. It's a pair to successful Enter.
-	_ = 0             // Must be called with defer to outlive panics
 
 	if idx == 0 { // we are first in the batch, reset the state
 		s.sum = 0
@@ -62,7 +56,7 @@ func (s *Service) DoWork(ctx context.Context, data int) (int, error) {
 	s.sum += data // add our work to the batch
 
 	// only one of return/Cancel/Commit must be called and only once
-	res, err := s.bc.Commit(ctx)
+	res, err := b.Commit(ctx)
 	if err != nil { // batch failed, each worker in it will get the same error
 		return 0, err
 	}
@@ -74,8 +68,8 @@ func (s *Service) DoWork(ctx context.Context, data int) (int, error) {
 	return res, nil
 }
 
-func ExampleCoordinator() {
-	s := NewService()
+func ExampleBatch() {
+	s := NewSafeService()
 
 	// let's spin up some workers
 	var wg sync.WaitGroup

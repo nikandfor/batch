@@ -3,6 +3,9 @@ package batch
 import "sync"
 
 type (
+	// Semaphore is a classical semaphore synchronization primitive.
+	// All methods can be safely called on nil Semaphore.
+	// They will do nothing like you have unlimited semaphore.
 	Semaphore struct {
 		mu   sync.Mutex
 		cond sync.Cond
@@ -11,6 +14,7 @@ type (
 	}
 )
 
+// NewSemaphore creates a new semaphore with capacity of n.
 func NewSemaphore(n int) *Semaphore {
 	b := &Semaphore{}
 
@@ -19,6 +23,10 @@ func NewSemaphore(n int) *Semaphore {
 	return b
 }
 
+// Reset resets semaphore capacity.
+// But not the current value, which means it can be used
+// to update limit on the fly, but it can't be used to reset
+// inconsistent semaphore.
 func (b *Semaphore) Reset(n int) {
 	if b == nil {
 		return
@@ -34,6 +42,7 @@ func (b *Semaphore) Reset(n int) {
 	b.lim = n
 }
 
+// Enter critical section.
 func (b *Semaphore) Enter() int {
 	if b == nil {
 		return 0
@@ -51,6 +60,7 @@ func (b *Semaphore) Enter() int {
 	return b.n
 }
 
+// Exit from critical section.
 func (b *Semaphore) Exit() {
 	if b == nil {
 		return
@@ -63,6 +73,7 @@ func (b *Semaphore) Exit() {
 	b.cond.Signal()
 }
 
+// Len is a number of tasks in the critical section.
 func (b *Semaphore) Len() int {
 	if b == nil {
 		return 0
@@ -74,6 +85,7 @@ func (b *Semaphore) Len() int {
 	return b.n
 }
 
+// Cap is a semaphore capacity.
 func (b *Semaphore) Cap() int {
 	if b == nil {
 		return 0
