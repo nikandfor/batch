@@ -9,11 +9,15 @@ import (
 	"nikand.dev/go/batch"
 )
 
-type SafeService struct {
-	sum int // state we collect to commit together
+type (
+	SafeService struct {
+		sum int // state we collect to commit together
 
-	bc *batch.Coordinator[int] // [int] is the result value type, set to struct{} if don't need it
-}
+		bc *batch.Coordinator[int] // [int] is the result value type, set to struct{} if don't need it
+	}
+
+	contextKeySafe struct{}
+)
 
 func NewSafeService() *SafeService {
 	s := &SafeService{}
@@ -51,7 +55,7 @@ func (s *SafeService) DoWork(ctx context.Context, data int) (int, error) {
 		log.Printf("* * * reset batch * * *")
 	}
 
-	log.Printf("worker %2d got in with index %2d", ctx.Value(contextKey{}), idx)
+	log.Printf("worker %2d got in with index %2d", ctx.Value(contextKeySafe{}), idx)
 
 	s.sum += data // add our work to the batch
 
@@ -61,7 +65,7 @@ func (s *SafeService) DoWork(ctx context.Context, data int) (int, error) {
 		return 0, err
 	}
 
-	log.Printf("worker %2d got result %v %v", ctx.Value(contextKey{}), res, err)
+	log.Printf("worker %2d got result %v %v", ctx.Value(contextKeySafe{}), res, err)
 
 	// if we are here, all of the workers have their work committed
 
@@ -69,12 +73,14 @@ func (s *SafeService) DoWork(ctx context.Context, data int) (int, error) {
 }
 
 func ExampleBatch() {
+	const jobs = 5
+
 	s := NewSafeService()
 
 	// let's spin up some workers
 	var wg sync.WaitGroup
 
-	for j := 0; j < *jobs; j++ {
+	for j := 0; j < jobs; j++ {
 		j := j
 		wg.Add(1)
 
@@ -82,7 +88,7 @@ func ExampleBatch() {
 			defer wg.Done()
 
 			ctx := context.Background() // passed to commit function
-			ctx = context.WithValue(ctx, contextKey{}, j)
+			ctx = context.WithValue(ctx, contextKeySafe{}, j)
 
 			res, err := s.DoWork(ctx, 1)
 			_, _ = res, err

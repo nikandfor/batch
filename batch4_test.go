@@ -2,12 +2,15 @@ package batch_test
 
 import (
 	"context"
+	"flag"
 	"runtime"
 	"sync"
 	"testing"
 
 	"nikand.dev/go/batch"
 )
+
+var jobs = flag.Int("jobs", 5, "parallel jobs in tests")
 
 func TestCoordinatorSmoke(tb *testing.T) {
 	const N = 3

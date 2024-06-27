@@ -3,14 +3,11 @@ package batch_test
 import (
 	"context"
 	"errors"
-	"flag"
 	"log"
 	"sync"
 
 	"nikand.dev/go/batch"
 )
-
-var jobs = flag.Int("jobs", 5, "parallel jobs")
 
 type (
 	Service struct {
@@ -75,12 +72,14 @@ func (s *Service) DoWork(ctx context.Context, data int) (int, error) {
 }
 
 func ExampleCoordinator() {
+	const jobs = 5
+
 	s := NewService()
 
 	// let's spin up some workers
 	var wg sync.WaitGroup
 
-	for j := 0; j < *jobs; j++ {
+	for j := 0; j < jobs; j++ {
 		j := j
 		wg.Add(1)
 

@@ -6,7 +6,7 @@ into one heavy "commit" (save) operation.
 batch ensures each task is either receive successful result if its results
 have been committed (possibly as a parth of a batch) or an error in other case.
 
-Logic for Coordinator
+# Logic for Coordinator
 
 	                    -------------------------
 	-> worker0 ------> | common cumulative state |            /--> worker0
@@ -29,7 +29,7 @@ Workers are distributed among multiple coaches and then each coach works the sam
 	              | -> | few independent coaches | -> result  ---> worker3
 	                    -------------------------
 
-Full Guide
+# Full Guide
 
 	bc.Queue().In() // get in the queue
 
