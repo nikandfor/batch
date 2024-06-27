@@ -85,6 +85,7 @@ func (c *Coordinator[Res]) Notify() {
 // It returns index of entered worker.
 // 0 means we are the first and we should reset the shared state.
 // If blocking == false and batch is not available negative value returned.
+// Enter also removes worker from the queue.
 func (c *Coordinator[Res]) Enter(blocking bool) int {
 	c.mu.Lock()
 

@@ -56,6 +56,9 @@ func (c *Multi[Res]) Notify() {
 
 // Enter enters available batch.
 // It will return -1, -1 if no coaches available and blocking == false.
+// Enter also removes worker from the queue.
+//
+// See also documentation for Coordinator.Enter.
 //
 // coach choice can be configured by setting custom Multi.Balancer.
 func (c *Multi[Res]) Enter(blocking bool) (coach, idx int) {

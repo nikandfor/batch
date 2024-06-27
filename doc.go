@@ -20,13 +20,13 @@ Logic for Coordinator
 Workers are distributed among multiple coaches and then each coach works the same as in Coordinator case.
 
 	                    -------------------------
-	              | -> | state is combined in a  |            /--> worker0
-	-> worker0 -> | -> | few independent coaches | -> result  ---> worker1
+	              | -> | workers are ditributed  |            /--> worker0
+	-> worker0 -> | -> | among free coaches      | -> result  ---> worker1
 	-> worker1 -> |     -------------------------
 	-> worker2 -> |
 	-> worker3 -> |     -------------------------
-	              | -> | each is committed as an |            /--> worker2
-	              | -> | independent part        | -> result  ---> worker3
+	              | -> | state is combined in a  |            /--> worker2
+	              | -> | few independent coaches | -> result  ---> worker3
 	                    -------------------------
 
 Full Guide
