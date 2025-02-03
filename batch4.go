@@ -226,7 +226,7 @@ func (q *Queue) In() int {
 	return int(atomic.AddInt32((*int32)(q), 1))
 }
 
-// In gets out of the queue.
+// Out gets out of the queue.
 func (q *Queue) Out() int {
 	return int(atomic.AddInt32((*int32)(q), -1))
 }

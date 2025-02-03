@@ -19,14 +19,14 @@ This is all without timeouts, additional goroutines, allocations, and channels.
 ## How it works
 
 * Each worker adds its work to a shared batch.
-* If there are no more workers ready to commit the last one runs commit, the others wait.
+* If there are no more workers in the queue the last one executes commit, the others wait.
 * Every worker in the batch gets the same result and error.
 
 ## Usage
 
 ```
 // General pattern is
-// Queue.In -> Enter -> defer Exit -> Commit/Cancel/return/panic
+// Queue.In -> Enter -> defer Exit -> add work to the batch -> Commit/Cancel/panic/return
 
 var sum int
 
@@ -66,7 +66,7 @@ for j := 0; j < N; j++ {
 }
 ```
 
-See the all available options in the doc.
+See the all available options in [the doc](https://pkg.go.dev/nikand.dev/go/batch).
 
 Batch is error and panic proof which means the user code can return error or panic in any place,
 but as soon as all the workers left the batch its state is reset.

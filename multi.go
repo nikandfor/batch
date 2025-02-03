@@ -9,14 +9,14 @@ type (
 	// Multi can't be created as a literal,
 	// it must be initialized either by NewMulti or Init.
 	Multi[Res any] struct {
-		// CommitFunc is called to commit result of batch number coach.
+		// CommitFunc is called to commit coach `coach`.
 		//
 		// It's already called owning critical section. Enter-Exit cycle must not be called from it.
 		CommitFunc func(ctx context.Context, coach int) (Res, error)
 
 		// Balancer chooses replica among available or it can choose to wait for more.
 		// bitset is a set of available coaches.
-		// Coach n is available <=> bitset[n/64] & (1<<(n%64)) != 0.
+		// Coach n is available <=> bitset & (1<<n) != 0.
 		// If returned value >= 0 and that coach is available it proceeds with it.
 		// If returned value < 0 or that coach is not available
 		// worker acts as there were no available coaches.
@@ -24,6 +24,7 @@ type (
 		available uint64
 
 		// BigBalancer is if 64 coaches is not enough.
+		// Coach n is available <=> bitset[n/64] & (1<<(n%64)) != 0.
 		BigBalancer  func(bitset []uint64) int
 		bigavailable []uint64
 
