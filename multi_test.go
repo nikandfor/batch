@@ -168,6 +168,7 @@ func BenchmarkMulti(tb *testing.B) {
 
 	tb.Run("Default_8", func(tb *testing.B) {
 		tb.ReportAllocs()
+
 		bc.Balancer = nil
 
 		tb.RunParallel(run)
@@ -175,10 +176,38 @@ func BenchmarkMulti(tb *testing.B) {
 
 	tb.Run("Balancer_8", func(tb *testing.B) {
 		tb.ReportAllocs()
-		bc.Balancer = func(x []uint64) int {
+
+		var called bool
+
+		bc.Balancer = func(x uint64) int {
+			called = true
+
+			return bits.Len64(x) - 1 - 1 // highest-1 or -1
+		}
+
+		tb.RunParallel(run)
+
+		if !called {
+			tb.Error("bakancer wasn't called")
+		}
+	})
+
+	tb.Run("BigBalancer_8", func(tb *testing.B) {
+		tb.ReportAllocs()
+
+		var called bool
+
+		bc.Balancer = nil
+		bc.BigBalancer = func(x []uint64) int {
+			called = true
+
 			return bits.Len64(x[0]) - 1 - 1 // highest-1 or -1
 		}
 
 		tb.RunParallel(run)
+
+		if !called {
+			tb.Error("bakancer wasn't called")
+		}
 	})
 }

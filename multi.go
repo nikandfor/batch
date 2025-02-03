@@ -20,8 +20,12 @@ type (
 		// If returned value >= 0 and that coach is available it proceeds with it.
 		// If returned value < 0 or that coach is not available
 		// worker acts as there were no available coaches.
-		Balancer  func(bitset []uint64) int
-		available []uint64
+		Balancer  func(bitset uint64) int
+		available uint64
+
+		// BigBalancer is if 64 coaches is not enough.
+		BigBalancer  func(bitset []uint64) int
+		bigavailable []uint64
 
 		lock
 
@@ -77,7 +81,7 @@ func (c *Multi[Res]) Enter(blocking bool) (coach, idx int) {
 	}
 
 again:
-	if c.Balancer != nil {
+	if c.Balancer != nil || c.BigBalancer != nil {
 		coach, idx := c.enterBalancer()
 		if idx >= 0 {
 			return coach, idx
@@ -105,12 +109,37 @@ again:
 }
 
 func (c *Multi[Res]) enterBalancer() (coach, idx int) {
-	if c.available == nil {
-		c.available = make([]uint64, (len(c.cs)+63)/64)
+	if c.Balancer == nil || len(c.cs) > 64 {
+		return c.enterBigBalancer()
 	}
 
-	for i := range c.available {
-		c.available[i] = 0
+	c.available = 0
+
+	for coach := range c.cs {
+		if c.cs[coach].cnt < 0 {
+			continue
+		}
+
+		c.available |= 1 << coach
+	}
+
+	coach = c.Balancer(c.available)
+	if coach < 0 || c.cs[coach].cnt < 0 {
+		return -1, -1
+	}
+
+	c.cs[coach].cnt++
+
+	return coach, c.cs[coach].cnt - 1
+}
+
+func (c *Multi[Res]) enterBigBalancer() (coach, idx int) {
+	if c.bigavailable == nil {
+		c.bigavailable = make([]uint64, (len(c.cs)+63)/64)
+	}
+
+	for i := range c.bigavailable {
+		c.bigavailable[i] = 0
 	}
 
 	for coach := range c.cs {
@@ -120,10 +149,10 @@ func (c *Multi[Res]) enterBalancer() (coach, idx int) {
 
 		i, j := coach/64, coach%64
 
-		c.available[i] |= 1 << j
+		c.bigavailable[i] |= 1 << j
 	}
 
-	coach = c.Balancer(c.available)
+	coach = c.BigBalancer(c.bigavailable)
 	if coach < 0 || c.cs[coach].cnt < 0 {
 		return -1, -1
 	}
