@@ -1,4 +1,4 @@
-package batch
+package sema
 
 import "sync"
 
@@ -12,6 +12,9 @@ type (
 
 		n, lim int
 	}
+
+	// Phore is if you want variable of type sema.Phore.
+	Phore = Semaphore
 )
 
 // NewSemaphore creates a new semaphore with capacity of n.
@@ -40,10 +43,38 @@ func (b *Semaphore) Reset(n int) {
 	}
 
 	b.lim = n
+	b.cond.Signal()
 }
 
 // Enter critical section.
-func (b *Semaphore) Enter() int {
+func (b *Semaphore) Enter() (int, bool) {
+	return b.Acquire(1)
+}
+
+func (b *Semaphore) Acquire(n int) (c int, blocked bool) {
+	if b == nil {
+		return 0, false
+	}
+
+	defer b.mu.Unlock()
+	b.mu.Lock()
+
+	for b.n+n > b.lim {
+		blocked = true
+		b.cond.Wait()
+	}
+
+	b.n += n
+
+	return b.n, blocked
+}
+
+// Exit from critical section.
+func (b *Semaphore) Exit() int {
+	return b.Release(1)
+}
+
+func (b *Semaphore) Release(n int) int {
 	if b == nil {
 		return 0
 	}
@@ -51,26 +82,10 @@ func (b *Semaphore) Enter() int {
 	defer b.mu.Unlock()
 	b.mu.Lock()
 
-	for b.n >= b.lim {
-		b.cond.Wait()
-	}
-
-	b.n++
+	b.n -= n
+	b.cond.Signal()
 
 	return b.n
-}
-
-// Exit from critical section.
-func (b *Semaphore) Exit() {
-	if b == nil {
-		return
-	}
-
-	defer b.mu.Unlock()
-	b.mu.Lock()
-
-	b.n--
-	b.cond.Signal()
 }
 
 // Len is a number of tasks in the critical section.

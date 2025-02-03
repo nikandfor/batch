@@ -1,14 +1,17 @@
-package batch_test
+package sema_test
 
 import (
+	"flag"
 	"sync"
 	"testing"
 
-	"nikand.dev/go/batch"
+	"nikand.dev/go/batch/sema"
 )
 
+var jobs = flag.Int("jobs", 5, "parallel jobs in tests")
+
 func TestSemaphore(tb *testing.T) {
-	s := batch.NewSemaphore(4)
+	s := sema.NewSemaphore(4)
 
 	var wg sync.WaitGroup
 	wg.Add(*jobs)
@@ -18,9 +21,9 @@ func TestSemaphore(tb *testing.T) {
 			defer wg.Done()
 
 			defer s.Exit()
-			n := s.Enter()
+			n, b := s.Enter()
 
-			tb.Logf("%d routines in a zone", n)
+			tb.Logf("%d routines in a zone, was blocked %v", n, b)
 		}()
 	}
 
@@ -46,7 +49,7 @@ func TestSemaphore(tb *testing.T) {
 }
 
 func TestSemaphoreNil(tb *testing.T) {
-	var s *batch.Semaphore
+	var s *sema.Semaphore
 
 	s.Reset(2)
 
