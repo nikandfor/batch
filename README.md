@@ -40,8 +40,6 @@ bc := batch.Coordinator[int]{
 
 for j := 0; j < N; j++ {
 	go func(j int) {
-		ctx := context.WithValue(ctx, workerID{}, j) // can be obtained in Coordinator.Commit
-
 		bc.Queue().In() // let others know we are going to join
 
 		data := 1 // prepare data
@@ -61,13 +59,14 @@ for j := 0; j < N; j++ {
 		}
 
 		// batching is transparent for worker
-		_ = res
+		_ = res // res is the sum returned by Commit
 	}(j)
 }
 ```
 
 See the all available options in [the doc](https://pkg.go.dev/nikand.dev/go/batch).
 
-Batch is error and panic proof which means the user code can return error or panic in any place,
-but as soon as all the workers left the batch its state is reset.
-But not the external state, it's callers responsibility to keep it consistent.
+`batch` is error- and panic-proof, meaning that user code can return an error or panic at any point.
+However, once all workers have exited the batch, its state is reset.
+External state, such as `sum` in this case, remains the caller's responsibility and must be kept consistent.
+

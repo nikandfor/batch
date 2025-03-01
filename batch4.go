@@ -48,7 +48,7 @@ type (
 		err error
 
 		ready   bool // res and err are set.
-		trigger bool // Commit has been triggered externally.
+		trigger bool // Commit has been triggered by the user.
 	}
 
 	// PanicError is returned to all the workers in the batch if one panicked.
