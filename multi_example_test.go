@@ -12,9 +12,14 @@ import (
 
 type (
 	ServiceMulti struct {
-		sum []int // state we collect to commit together
+		// Multiple parallel states.
+		// Each is independent of others.
+		// Each worker is assigned to one of the states.
+		// Each state is triggered and committed separately.
+		// If no more workers are ready, all states are triggered.
+		sum []int
 
-		bc *batch.Multi[int] // [int] is the result value type, set to struct{} if don't need it
+		bc *batch.Multi[int] // [int] is the result type, set to struct{} if don't need it
 	}
 )
 
@@ -34,6 +39,7 @@ func (s *ServiceMulti) commit(ctx context.Context, coach int) (int, error) {
 
 	log.Printf("* * *  coach: %2d, commit %2d  * * *", coach, s.sum[coach])
 
+	// pretend there is a heavy operaion
 	time.Sleep(time.Millisecond) // let other workers to use another coach
 
 	return s.sum[coach], nil
@@ -97,7 +103,7 @@ func ExampleMulti() {
 		go func() {
 			defer wg.Done()
 
-			ctx := context.Background() // passed to commit function
+			ctx := context.Background() // propagated to commit function
 			ctx = context.WithValue(ctx, contextKey{}, j)
 
 			res, err := s.DoWork(ctx, 1)

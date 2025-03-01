@@ -9,13 +9,16 @@ import (
 )
 
 type (
-	// Queue of workers waiting to Enter the batch.
-	Queue int32
+	// Queue of workers going to Enter the batch.
+	// It's returned from Coordinator to worker for it to get in.
+	Queue struct {
+		c atomic.Int32
+	}
 
 	// Coordinator coordinates workers to update shared state,
 	// commit it, and deliver result to all participated workers.
 	Coordinator[Res any] struct {
-		// CommitFunc is called to commit shared shate.
+		// CommitFunc is called to commit shared state.
 		//
 		// It's already called owning critical section. Enter-Exit cycle must not be called from it.
 		//
@@ -35,12 +38,17 @@ type (
 	}
 
 	coach[Res any] struct {
+		// Batch state.
+		// - If cnt >= 0, the batch is being filled up, and cnt is the number of workers have entered.
+		// - If cnt < 0, the batch has been committed/canceled, and -cnt is the number of workers still in the batch.
 		cnt int
 
-		res     Res
-		err     error
-		ready   bool
-		trigger bool
+		// Batch result.
+		res Res
+		err error
+
+		ready   bool // res and err are set.
+		trigger bool // Commit has been triggered externally.
 	}
 
 	// PanicError is returned to all the workers in the batch if one panicked.
@@ -50,7 +58,7 @@ type (
 	}
 )
 
-// Canceled is a default error returned to workers if Cancel was called with nil err.
+// Canceled is the default error returned to workers when Cancel is called with a nil error.
 var Canceled = errors.New("batch canceled")
 
 // New creates new Coordinator.
@@ -66,7 +74,7 @@ func (c *Coordinator[Res]) Init(f func(ctx context.Context) (Res, error)) {
 	c.CommitFunc = f
 }
 
-// Gets the queue of waitng workers.
+// Gets the queue of waiting workers.
 //
 // Worker can leave the Queue before Enter,
 // but we must call Notify to wake up waiting workers.
@@ -93,19 +101,20 @@ func (c *Coordinator[Res]) Notify() {
 func (c *Coordinator[Res]) Enter(blocking bool) int {
 	c.mu.Lock()
 
-	c.queue.Out()
+	q := c.queue.Out()
+	if q < 0 {
+		panic("batch misuse: negative queue length. c.Queue().In() before c.Enter()")
+	}
 
 	if c.cond.L == nil {
 		c.cond.L = &c.mu
 	}
 
 	if c.cnt < 0 && !blocking {
-		idx := c.cnt
-
 		c.mu.Unlock()
 		c.cond.Broadcast()
 
-		return idx
+		return -1
 	}
 
 	for c.cnt < 0 {
@@ -118,7 +127,7 @@ func (c *Coordinator[Res]) Enter(blocking bool) int {
 }
 
 // Exit exits the critical section.
-// It should be called with defer just after we successfuly Entered the batch.
+// It should be called with defer just after we successfully Entered the batch.
 // It's similar to Mutex.Unlock.
 // Returns number of workers have not Exited yet.
 // 0 means we are the last exiting the batch, state can be reset here.
@@ -129,6 +138,10 @@ func (c *Coordinator[Res]) Exit() int {
 		c.cond.Broadcast()
 	}()
 
+	return c.coach.exit()
+}
+
+func (c *coach[Res]) exit() int {
 	if c.cnt > 0 {
 		p := recover()
 		if p == nil { // we just left
@@ -149,6 +162,7 @@ func (c *Coordinator[Res]) Exit() int {
 	if c.cnt == 0 {
 		var zero Res
 		c.res, c.err, c.ready = zero, nil, false
+		c.trigger = false
 	}
 
 	return idx
@@ -181,62 +195,67 @@ func (c *Coordinator[Res]) Cancel(ctx context.Context, err error) (Res, error) {
 }
 
 func commit[Res any](ctx context.Context, c *lock, cc *coach[Res], err error, f func(ctx context.Context) (Res, error)) (Res, error) {
-again:
-	if err != nil || cc.trigger || c.queue.Len() == 0 {
-		cc.cnt = -cc.cnt
-
-		if err != nil {
-			cc.err = err
-			cc.ready = true
-
-			return cc.res, cc.err
+	for {
+		if cc.cnt >= 0 && (err != nil || cc.trigger || c.queue.Len() == 0) {
+			return finalize[Res](ctx, c, cc, err, f)
 		}
 
-		func() {
-			defer func() {
-				cc.ready = true
-
-				if p := recover(); p != nil {
-					cc.err = PanicError{Panic: p}
-				}
-			}()
-
-			c.mu.Unlock()
-			defer c.mu.Lock()
-
-			cc.res, cc.err = f(ctx)
-		}()
-	} else {
-	wait:
 		c.cond.Wait()
 
-		if cc.cnt > 0 {
-			goto again
-		}
-		if !cc.ready {
-			goto wait
+		if cc.ready {
+			break
 		}
 	}
 
 	return cc.res, cc.err
 }
 
+func finalize[Res any](ctx context.Context, c *lock, cc *coach[Res], err error, f func(ctx context.Context) (Res, error)) (Res, error) {
+	if cc.cnt < 0 {
+		panic("batch: inconsistent state")
+	}
+
+	cc.cnt = -cc.cnt
+
+	if err != nil {
+		cc.err = err
+		cc.ready = true
+
+		return cc.res, cc.err
+	}
+
+	defer func() {
+		cc.ready = true
+
+		if p := recover(); p != nil {
+			cc.err = PanicError{Panic: p}
+		}
+	}()
+
+	c.mu.Unlock()
+	defer c.mu.Lock()
+
+	cc.res, cc.err = f(ctx)
+
+	return cc.res, cc.err
+}
+
 // In gets into the queue.
 func (q *Queue) In() int {
-	return int(atomic.AddInt32((*int32)(q), 1))
+	return int(q.c.Add(1))
 }
 
 // Out gets out of the queue.
 func (q *Queue) Out() int {
-	return int(atomic.AddInt32((*int32)(q), -1))
+	return int(q.c.Add(-1))
 }
 
 // Len is the number of workers in the queue.
 func (q *Queue) Len() int {
-	return int(atomic.LoadInt32((*int32)(q)))
+	return int(q.c.Load())
 }
 
-// AsPanicError unwrapes PanicError.
+// AsPanicError unwraps PanicError.
 func AsPanicError(err error) (PanicError, bool) {
 	var pe PanicError
 

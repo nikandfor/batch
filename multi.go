@@ -14,6 +14,8 @@ type (
 		// It's already called owning critical section. Enter-Exit cycle must not be called from it.
 		CommitFunc func(ctx context.Context, coach int) (Res, error)
 
+		lock // protects everything below
+
 		// Balancer chooses replica among available or it can choose to wait for more.
 		// bitset is a set of available coaches.
 		// Coach n is available <=> bitset & (1<<n) != 0.
@@ -28,19 +30,17 @@ type (
 		BigBalancer  func(bitset []uint64) int
 		bigavailable []uint64
 
-		lock
-
 		cs []coach[Res]
 	}
 )
 
 // NewMulti create new Multi coordinator with n parallel batches.
 func NewMulti[Res any](n int, f func(ctx context.Context, coach int) (Res, error)) *Multi[Res] {
-	return &Multi[Res]{
-		CommitFunc: f,
+	c := &Multi[Res]{}
 
-		cs: make([]coach[Res], n),
-	}
+	c.Init(n, f)
+
+	return c
 }
 
 // Init initiates zero Multi.
@@ -48,6 +48,7 @@ func NewMulti[Res any](n int, f func(ctx context.Context, coach int) (Res, error
 func (c *Multi[Res]) Init(n int, f func(ctx context.Context, coach int) (Res, error)) {
 	c.CommitFunc = f
 	c.cs = make([]coach[Res], n)
+	c.cond.L = &c.mu
 }
 
 // Queue returns common queue for all coaches.
@@ -77,43 +78,50 @@ func (c *Multi[Res]) Enter(blocking bool) (coach, idx int) {
 
 	c.queue.Out()
 
-	if c.cond.L == nil {
-		c.cond.L = &c.mu
-	}
+	for {
+		coach = c.selectCoach()
 
-again:
-	if c.Balancer != nil || c.BigBalancer != nil {
-		coach, idx := c.enterBalancer()
-		if idx >= 0 {
-			return coach, idx
+		if coach >= 0 && c.cs[coach].cnt >= 0 {
+			c.cs[coach].cnt++
+
+			return coach, c.cs[coach].cnt - 1
 		}
-	} else {
-		for coach := range c.cs {
-			if idx := c.cs[coach].cnt; idx >= 0 {
-				c.cs[coach].cnt++
 
-				return coach, idx
-			}
+		if !blocking {
+			c.mu.Unlock()
+			c.cond.Broadcast()
+
+			return -1, -1
 		}
+
+		c.cond.Wait()
 	}
-
-	if !blocking {
-		c.mu.Unlock()
-		c.cond.Broadcast()
-
-		return -1, -1
-	}
-
-	c.cond.Wait()
-
-	goto again
 }
 
-func (c *Multi[Res]) enterBalancer() (coach, idx int) {
-	if c.Balancer == nil || len(c.cs) > 64 {
-		return c.enterBigBalancer()
+func (c *Multi[Res]) selectCoach() (coach int) {
+	switch {
+	case c.Balancer != nil && len(c.cs) <= 64:
+		return c.balancerCoach()
+	case c.BigBalancer != nil:
+		return c.bigBalancerCoach()
+	case c.Balancer != nil:
+		panic("balancer only supports up to 64 coaches")
+	default:
+		return c.firstCoach()
+	}
+}
+
+func (c *Multi[Res]) firstCoach() (coach int) {
+	for coach := range c.cs {
+		if c.cs[coach].cnt >= 0 {
+			return coach
+		}
 	}
 
+	return -1
+}
+
+func (c *Multi[Res]) balancerCoach() (coach int) {
 	c.available = 0
 
 	for coach := range c.cs {
@@ -124,17 +132,10 @@ func (c *Multi[Res]) enterBalancer() (coach, idx int) {
 		c.available |= 1 << coach
 	}
 
-	coach = c.Balancer(c.available)
-	if coach < 0 || c.cs[coach].cnt < 0 {
-		return -1, -1
-	}
-
-	c.cs[coach].cnt++
-
-	return coach, c.cs[coach].cnt - 1
+	return c.Balancer(c.available)
 }
 
-func (c *Multi[Res]) enterBigBalancer() (coach, idx int) {
+func (c *Multi[Res]) bigBalancerCoach() (coach int) {
 	if c.bigavailable == nil {
 		c.bigavailable = make([]uint64, (len(c.cs)+63)/64)
 	}
@@ -153,14 +154,7 @@ func (c *Multi[Res]) enterBigBalancer() (coach, idx int) {
 		c.bigavailable[i] |= 1 << j
 	}
 
-	coach = c.BigBalancer(c.bigavailable)
-	if coach < 0 || c.cs[coach].cnt < 0 {
-		return -1, -1
-	}
-
-	c.cs[coach].cnt++
-
-	return coach, c.cs[coach].cnt - 1
+	return c.BigBalancer(c.bigavailable)
 }
 
 // Exit the batch. Should be called with defer.
@@ -171,31 +165,7 @@ func (c *Multi[Res]) Exit(coach int) int {
 		c.cond.Broadcast()
 	}()
 
-	cc := &c.cs[coach]
-
-	if cc.cnt > 0 {
-		p := recover()
-		if p == nil { // we just left
-			cc.cnt--
-			return cc.cnt
-		}
-
-		cc.cnt = -cc.cnt
-		cc.err = PanicError{Panic: p}
-		cc.ready = true
-
-		defer panic(p)
-	}
-
-	cc.cnt++
-	idx := -cc.cnt
-
-	if cc.cnt == 0 {
-		var zero Res
-		cc.res, cc.err, cc.ready = zero, nil, false
-	}
-
-	return idx
+	return c.cs[coach].exit()
 }
 
 // Trigger the batch to commit.

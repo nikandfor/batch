@@ -86,7 +86,7 @@ func ExampleCoordinator() {
 		go func() {
 			defer wg.Done()
 
-			ctx := context.Background() // passed to commit function
+			ctx := context.Background() // propagated to commit function
 			ctx = context.WithValue(ctx, contextKey{}, j)
 
 			res, err := s.DoWork(ctx, 1)
