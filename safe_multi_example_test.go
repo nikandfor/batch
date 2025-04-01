@@ -40,11 +40,9 @@ func (s *SafeServiceMulti) commit(ctx context.Context, coach int) (int, error) {
 }
 
 func (s *SafeServiceMulti) DoWork(ctx context.Context, data int) (int, error) {
-	b := batch.ByMulti(s.bc)
-	defer b.Exit() // it's like Mutex.Unlock, but safely works even if we didn't enter
-	_ = 0          // Must be called with defer to outlive panics
-
-	b.QueueIn() // let others know we are going to join
+	b := batch.QueueInMulti(s.bc) // letting know other workers we are going
+	defer b.Exit()                // it's like Mutex.Unlock, but safely works even if we didn't enter
+	_ = 0                         // Must be called with defer to outlive panics
 
 	_ = data // prepare data
 

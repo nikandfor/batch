@@ -29,6 +29,15 @@ func By[Res any](c *Controller[Res]) Batch[Res] {
 	}
 }
 
+func QueueIn[Res any](c *Controller[Res]) Batch[Res] {
+	c.queue.In()
+
+	return Batch[Res]{
+		c:     c,
+		state: stateQueued,
+	}
+}
+
 func (b *Batch[Res]) QueueIn() int {
 	if b.state != stateNew {
 		panic(usage)
@@ -73,13 +82,17 @@ func (b *Batch[Res]) Cancel(ctx context.Context, err error) (Res, error) {
 }
 
 func (b *Batch[Res]) Commit(ctx context.Context) (Res, error) {
+	return b.CommitFunc(ctx, b.c.Committer)
+}
+
+func (b *Batch[Res]) CommitFunc(ctx context.Context, f CommitFunc[Res]) (Res, error) {
 	if b.state != stateEntered {
 		panic(usage)
 	}
 
 	b.state = stateCommitted
 
-	return b.c.Commit(ctx)
+	return b.c.CommitFunc(ctx, f)
 }
 
 func (b *Batch[Res]) Exit() {

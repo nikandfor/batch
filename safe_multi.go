@@ -19,6 +19,15 @@ func ByMulti[Res any](c *Multi[Res]) MultiBatch[Res] {
 	}
 }
 
+func QueueInMulti[Res any](c *Multi[Res]) MultiBatch[Res] {
+	c.queue.In()
+
+	return MultiBatch[Res]{
+		c:     c,
+		state: stateQueued,
+	}
+}
+
 func (b *MultiBatch[Res]) QueueIn() int {
 	if b.state != stateNew {
 		panic(usage)
@@ -65,13 +74,17 @@ func (b *MultiBatch[Res]) Cancel(ctx context.Context, err error) (Res, error) {
 }
 
 func (b *MultiBatch[Res]) Commit(ctx context.Context) (Res, error) {
+	return b.CommitFunc(ctx, b.c.Committer)
+}
+
+func (b *MultiBatch[Res]) CommitFunc(ctx context.Context, f CommitMultiFunc[Res]) (Res, error) {
 	if b.state != stateEntered {
 		panic(usage)
 	}
 
 	b.state = stateCommitted
 
-	return b.c.Commit(ctx, b.coach)
+	return b.c.CommitFunc(ctx, b.coach, f)
 }
 
 func (b *MultiBatch[Res]) Exit() int {
@@ -82,8 +95,7 @@ func (b *MultiBatch[Res]) Exit() int {
 	case stateQueued:
 		b.c.queue.Out()
 		b.c.Notify()
-	case stateEntered,
-		stateCommitted:
+	case stateEntered, stateCommitted:
 		idx = b.c.Exit(b.coach)
 	default:
 		panic(usage)
