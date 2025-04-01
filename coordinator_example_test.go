@@ -13,7 +13,7 @@ type (
 	Service struct {
 		sum int // state we collect to commit together
 
-		bc *batch.Coordinator[int] // [int] is the result value type, set to struct{} if don't need it
+		bc *batch.Controller[int] // [int] is the result value type, set to struct{} if don't need it
 	}
 
 	contextKey struct{}
@@ -71,7 +71,7 @@ func (s *Service) DoWork(ctx context.Context, data int) (int, error) {
 	return res, nil
 }
 
-func ExampleCoordinator() {
+func ExampleController() {
 	const jobs = 5
 
 	s := NewService()
@@ -79,8 +79,7 @@ func ExampleCoordinator() {
 	// let's spin up some workers
 	var wg sync.WaitGroup
 
-	for j := 0; j < jobs; j++ {
-		j := j
+	for j := range jobs {
 		wg.Add(1)
 
 		go func() {

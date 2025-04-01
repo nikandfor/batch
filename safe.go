@@ -4,7 +4,7 @@ import "context"
 
 type (
 	Batch[Res any] struct {
-		c *Coordinator[Res]
+		c *Controller[Res]
 
 		noCopy noCopy //nolint:unused
 		state  byte
@@ -23,7 +23,7 @@ const (
 	usage = "By -> defer Exit -> [QueueIn] -> Enter -> Cancel/Commit/return"
 )
 
-func By[Res any](c *Coordinator[Res]) Batch[Res] {
+func By[Res any](c *Controller[Res]) Batch[Res] {
 	return Batch[Res]{
 		c: c,
 	}
@@ -82,24 +82,19 @@ func (b *Batch[Res]) Commit(ctx context.Context) (Res, error) {
 	return b.c.Commit(ctx)
 }
 
-func (b *Batch[Res]) Exit() int {
-	idx := -1
-
+func (b *Batch[Res]) Exit() {
 	switch b.state {
 	case stateNew:
 	case stateQueued:
 		b.c.queue.Out()
 		b.c.Notify()
-	case stateEntered,
-		stateCommitted:
-		idx = b.c.Exit()
+	case stateEntered, stateCommitted:
+		b.c.Exit()
 	default:
 		panic(usage)
 	}
 
 	b.state = stateExited
-
-	return idx
 }
 
 func (noCopy) Lock()   {}

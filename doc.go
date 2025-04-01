@@ -1,26 +1,32 @@
 /*
-batch made easy.
+Package batch makes batched operations easy.
 
-batch is a safe and efficient way to combine results of multiple parallel tasks
-into one heavy "commit" (save) operation.
-batch ensures each task is either receive successful result if its results
-have been committed (possibly as a parth of a batch) or an error in other case.
+Batch provides a safe and efficient mechanism to aggregate the results
+of multiple parallel tasks into a single, potentially expensive, "commit" operation.
+Batch ensures that each participating task either receives a successful result
+if its contribution has been committed (possibly as part of a larger batch)
+or an appropriate error otherwise.
 
-# Logic for Coordinator
+# Logic for Controller
 
 	                    -------------------------
 	-> worker0 ------> | common cumulative state |            /--> worker0
-	-> worker1 ------> | collected from multiple | -> result  ---> worker1
-	-> worker2 ------> | workers and committed   |            \--> worker2
-	-> worker3 ------> | all at once             |             \-> worker3
+	-> worker1 ------> | collected from multiple |           /---> worker1
+	-> worker2 ------> | workers and committed   | -> result ----> worker2
+	-> worker3 ------> | all at once             |           \---> worker3
 	                    -------------------------
 
 # Logic for Multi
 
-Workers are distributed among multiple coaches and then each coach works the same as in Coordinator case.
+Workers are distributed among multiple parallel batches (coaches), similar to multiple
+coaches on a cable car. Each batch then operates independently in the same way as a
+single Controller. This allows for concurrent commit operations across different batches,
+improving throughput when the underlying commit operation supports parallelism (e.g.,
+multiple database replicas). However, it is not beneficial for systems where the final
+commit operation is inherently serial (e.g., a single embedded database).
 
 	                    -------------------------
-	              | -> | workers are ditributed  |            /--> worker0
+	              | -> | workers ditributed      |            /--> worker0
 	-> worker0 -> | -> | among free coaches      | -> result  ---> worker1
 	-> worker1 -> |     -------------------------
 	-> worker2 -> |
@@ -29,74 +35,86 @@ Workers are distributed among multiple coaches and then each coach works the sam
 	              | -> | few independent coaches | -> result  ---> worker3
 	                    -------------------------
 
-# Full Guide
+# Full Example for Controller.
 
-	bc.Queue().In() // get in the queue
+	bc.Queue().In() // Get in the queue to participate in the batch.
 
-	// Get data ready for the commit.
-	// All the independent from other workers operations should be done here.
+	// Prepare data for the commit operation.
+	// Any operations independent of other workers in the batch should be done here.
 	data := 1
 
 	if leave() {
-		bc.Queue().Out() // Get out of the queue.
-		bc.Notify()      // Notify waiting goroutines we won't come.
+		bc.Queue().Out()  // Leave the queue if we don't need to participate.
+		bc.Notify()      // Unblock waiting workers.
 		return errNoNeed
 	}
 
-	idx := bc.Enter(true) // true to block and wait, false for non-blocking return if batch is in the process of commiting.
-	                     // Just like with the Mutex there are no guaranties who will enter first.
-	if idx < 0 {        // In non-blocking mode we didn't Enter the batch, it's always >= 0 in blocking mode.
-		return errBusy // No need to do anything here.
+	idx := bc.Enter(true) // Set 'blocking' to true to wait, or false for non-blocking behavior.
+	                     // Like Mutex.Lock, the order of entry for waiting goroutines is not guaranteed.
+	if idx < 0 {        // If non-blocking Enter failed (batch is busy),
+		return errBusy // the caller might retry later.
 	}
 
-	defer bc.Exit() // if we entered we must exit
-	_ = 0          // calling it with defer ensures state consistency in case of panic
+	defer bc.Exit() // Ensure Exit is called to release the batch's resources.
+	               // Using defer with Exit guarantees state consistency even if a panic occurs.
 
-	// We are inside locked Mutex between Enter and Exit.
-	// So the shared state can be modified safely.
-	// That also means that all the long and heavy operations
-	// should be done before Enter.
+	// Critical section: Code between Enter and Exit has exclusive access to the batch's shared state.
+	// Modify shared data safely within this block.
+	// It's generally recommended to perform any long or computationally intensive
+	// operations *before* calling Enter to minimize the time spent holding the lock.
 
-	if idx == 0 { // we are first in the batch, reset the state
+	if idx == 0 { // If this worker is the first to enter the batch, initialize or reset the shared state.
 		sum = 0
 	}
 
-	if full() {            // if we didn't change the state we can just leave.
-		bc.Trigger()      // Optionally we can trigger the batch.
-		                 // Common use case is to flush the data if we won't fit.
-		return errRetry // Then we may return and retry in the next batch.
+	if full() {             // If the batch is full and we cannot add our data.
+		bc.Trigger()       // Optionally trigger the commit of the current batch.
+				          // This is a common pattern to flush the batch even if the current
+				         // worker didn't add anything, allowing others to commit.
+		return errRetry // Return and attempt to join a new batch later to retry.
 	}
 
-	sum += data // adding our work to the batch
+	sum += data // Add the current worker's contribution to the batch's shared data.
 
-	if spoilt() {						   // If we spoilt the satate and want to abort commit
-		_, err = bc.Cancel(ctx, causeErr) // cancel the batch. Commit isn't done, all workers get causeErr.
-		                                 // If causeErr is nil it's set to Canceled.
+	if spoilt() {                          // If the shared state has become invalid and the commit should be aborted.
+		_, err = bc.Cancel(ctx, causeErr) // Cancel the current batch. The Committer function will not be executed.
+						                 // All workers currently in the Enter-Exit section for this batch
+						                // will receive the provided `causeErr`. If `causeErr` is nil,
+						               // a default `Canceled` error will be returned.
+						              // The first worker to enter a new batch will typically be responsible
+					                 // for any necessary cleanup of the shared state.
 	}
 
-	if failed() {                          // Suppose some library panicked here.
-		panic("we can safely panic here") // Panic will be propogated to the caller,
-		                                 // other goroutines in the batch will get PanicError.
+	if calledSomeLib() {
+		panic(p) // If a panic occurs, the batch recovers, re-raises it for this worker,
+			    // and signals other waiting workers in the batch with a PanicError
+			   // when their Commit call returns.
 	}
 
-	if urgent() {     // If we want to commit immideately
-		bc.Trigger() // trigger it.
-		            // Workers already added their job will be committed too.
-				   // Workers haven't entered the batch will go to the next one.
+	if urgent() {     // If an immediate commit of the current batch is desired.
+		bc.Trigger() // Signal the batch to initiate the commit process.
+				    // Workers that have already entered and contributed to this batch
+				   // will have their work included in the current commit.
+				  // Workers that have not yet entered will join a subsequent batch.
 	}
 
-	res, err := bc.Commit(ctx) // Call Commit.
-	                          // The last goroutine entered the batch calls the actual Coordinator.Commit.
-	                         // All the others wait and get the same res and error.
+	res, err := bc.Commit(ctx) // Commit and wait.
+	                          // Last worker to Enter triggers Committer.
+				             // All batch workers get the same `res` and `err`.
 
-Batch is a safe wrapper around Coordinator.
-It will call missed methods if that makes sense or panic otherwise.
+Batch is a safe wrapper around Controller.
+It handles certain edge cases and ensures proper synchronization,
+calling underlying Controller methods where appropriate and panicking
+in scenarios that would lead to undefined behavior or data corruption.
 
-Multi is a coordinator with N available parallel batches.
-Suppose you have 3 db replicas so you can distribute load across them.
-Multi.Enter will enter the first free coach (replica in our example) and return its index.
-The rest is similar to Coordinator. Custom logic for choosing coach can be used by setting Multi.Balancer.
+Multi extends the Controller concept by providing N independent, parallel batches.
+Consider a scenario with 3 database replicas; Multi allows distributing commit operations
+across these replicas concurrently. Multi.Enter attempts to join the first available
+batch (coach, representing a replica in this example) and returns the index of that batch.
+The subsequent workflow (Exit, Trigger, Commit, Cancel) operates similarly to the Controller
+but is scoped to the specific batch (coach) the worker entered. You can customize the
+batch selection logic by providing a custom Multi.Balancer.
 
-MultiBatch is a safe wrapper around Multi just like Batch wraps Coordinator.
+MultiBatch is a safe wrapper for Multi, similar to Batch for Controller.
 */
 package batch

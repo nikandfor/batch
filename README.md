@@ -30,9 +30,8 @@ This is all without timeouts, additional goroutines, allocations, and channels.
 
 var sum int
 
-bc := batch.Coordinator[int]{
-	// Required
-	Commit: func(ctx context.Context) (int, error) {
+bc := batch.Controller[int]{
+	Committer: func(ctx context.Context) (int, error) {
 		// commit sum
 		return sum, err
 	},

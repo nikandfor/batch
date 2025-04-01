@@ -13,7 +13,7 @@ type (
 	SafeService struct {
 		sum int // state we collect to commit together
 
-		bc *batch.Coordinator[int] // [int] is the result value type, set to struct{} if don't need it
+		bc *batch.Controller[int] // [int] is the result value type, set to struct{} if don't need it
 	}
 
 	contextKeySafe struct{}
@@ -80,8 +80,7 @@ func ExampleBatch() {
 	// let's spin up some workers
 	var wg sync.WaitGroup
 
-	for j := 0; j < jobs; j++ {
-		j := j
+	for j := range jobs {
 		wg.Add(1)
 
 		go func() {

@@ -5,37 +5,48 @@ import (
 )
 
 type (
-	// Multi is a coordinator for multiple parallel batches.
-	// Multi can't be created as a literal,
-	// it must be initialized either by NewMulti or Init.
+	// Multi manages multiple parallel batches, like multiple coaches on a cable car.
+	// It allows workers to join and commit to different batches concurrently,
+	// improving throughput when the underlying commit operation supports parallelism
+	// (e.g., multiple database replicas).
+	// It is not beneficial for systems where the final commit operation is inherently serial
+	// (e.g., a single embedded database).
+	// Multi instances should be created with NewMulti or initialized with Init, not as literals.
 	Multi[Res any] struct {
-		// CommitFunc is called to commit coach `coach`.
+		// Committer is invoked to commit the `coach` state.
 		//
-		// It's already called owning critical section. Enter-Exit cycle must not be called from it.
-		CommitFunc func(ctx context.Context, coach int) (Res, error)
+		// Called within a critical section. Do not call other Multi methods here.
+		//
+		// Set Committer OR use Multi.CommitFunc.
+		Committer CommitMultiFunc[Res]
 
 		lock // protects everything below
 
-		// Balancer chooses replica among available or it can choose to wait for more.
-		// bitset is a set of available coaches.
-		// Coach n is available <=> bitset & (1<<n) != 0.
-		// If returned value >= 0 and that coach is available it proceeds with it.
-		// If returned value < 0 or that coach is not available
-		// worker acts as there were no available coaches.
+		// Balancer selects an available batch (coach) or signals that none are available.
+		// bitset represents the set of available batches.
+		// Batch `n` is available if bitset has the n-th bit set (bitset & (1<<n) != 0).
+		// The Multi code interprets the Balancer's return value:
+		// If non-negative, it attempts to use that batch.
+		// If negative OR the selected batch is not actually available,
+		// Multi treats it as if no batches are available,
+		// either returning immediately in non-blocking mode or blocking until a batch gets free.
 		Balancer  func(bitset uint64) int
 		available uint64
 
-		// BigBalancer is if 64 coaches is not enough.
-		// Coach n is available <=> bitset[n/64] & (1<<(n%64)) != 0.
+		// BigBalancer is used when more than 64 batches (coaches) are needed.
+		// Batch `n` is available if the n-th bit is set in the bitset slice
+		// (bitset[n/64] & (1<<(n%64)) != 0).
 		BigBalancer  func(bitset []uint64) int
 		bigavailable []uint64
 
 		cs []coach[Res]
 	}
+
+	CommitMultiFunc[Res any] = func(ctx context.Context, coach int) (Res, error)
 )
 
-// NewMulti create new Multi coordinator with n parallel batches.
-func NewMulti[Res any](n int, f func(ctx context.Context, coach int) (Res, error)) *Multi[Res] {
+// NewMulti creates a new Multi controller managing `n` parallel batches.
+func NewMulti[Res any](n int, f CommitMultiFunc[Res]) *Multi[Res] {
 	c := &Multi[Res]{}
 
 	c.Init(n, f)
@@ -43,36 +54,38 @@ func NewMulti[Res any](n int, f func(ctx context.Context, coach int) (Res, error
 	return c
 }
 
-// Init initiates zero Multi.
-// It can also be used as Reset but not in parallel with its usage.
-func (c *Multi[Res]) Init(n int, f func(ctx context.Context, coach int) (Res, error)) {
-	c.CommitFunc = f
+// Init initializes the Multi controller with `n` parallel batches.
+// Can also be used to reset the Multi, but not concurrently with active operations.
+func (c *Multi[Res]) Init(n int, f CommitMultiFunc[Res]) {
+	c.Committer = f
 	c.cs = make([]coach[Res], n)
 	c.cond.L = &c.mu
 }
 
-// Queue returns common queue for all coaches.
-// Getting into it means already started batches will wait for it not committing yet.
+// Queue returns a shared queue for all batches (coaches).
+// Joining this queue means that currently running batches will wait
+// for this worker before finalizing their commit.
 //
-// Worker can leave the Queue before Enter, but we must call Notify to wake up waiting workers.
+// Workers can leave the Queue before entering a batch, but Notify must be called
+// to signal waiting workers in that case.
 func (c *Multi[Res]) Queue() *Queue {
 	return &c.lock.queue
 }
 
-// Notify wakes up waiting workers.
-//
-// Must be called if the worker left the Queue before Enter.
+// Notify signals the Multi controller that it can proceed with the commit,
+// as this worker that intended to join will not.
+// Must be called if a worker leaves the Queue before entering a batch.
 func (c *Multi[Res]) Notify() {
 	c.cond.Broadcast()
 }
 
-// Enter available batch.
-// It will return -1, -1 if blocking == false and no batches available.
-// Enter also removes worker from the queue.
+// Enter attempts to join an available batch.
+// Returns (-1, -1) if blocking is false and no batches are available.
+// Enter also removes the worker from the shared queue.
 //
-// See also documentation for Coordinator.Enter.
+// Must be paired with a call to Exit. See the documentation for Controller.Enter for more details.
 //
-// coach choice can be configured by setting custom Multi.Balancer.
+// The batch (coach) selection can be customized by setting a custom Multi.Balancer.
 func (c *Multi[Res]) Enter(blocking bool) (coach, idx int) {
 	c.mu.Lock()
 
@@ -157,8 +170,8 @@ func (c *Multi[Res]) bigBalancerCoach() (coach int) {
 	return c.BigBalancer(c.bigavailable)
 }
 
-// Exit the batch. Should be called with defer.
-// It works similar to Mutex.Unlock in the sense it unlocks shared resources.
+// Exit the specified batch. Should be called with defer.
+// Similar to Mutex.Unlock, it releases access to the shared resources of that batch.
 func (c *Multi[Res]) Exit(coach int) int {
 	defer func() {
 		c.mu.Unlock()
@@ -168,29 +181,39 @@ func (c *Multi[Res]) Exit(coach int) int {
 	return c.cs[coach].exit()
 }
 
-// Trigger the batch to commit.
+// Trigger the specified batch to commit.
 // Must be called inside Enter-Exit section.
 //
-// Can be used to flush current batch. With our data or without and then we can retry.
-// Commit happens when current worker Exits from critical section.
-// So you need to Exit and then get into the Queue and Enter again to retry.
+// Can be called before or after adding data to the batch.
+// The commit is initiated when this worker calls Commit or Exit.
+// If calling Exit, the worker may get into the Queue and Enter again to retry the batch.
 func (c *Multi[Res]) Trigger(coach int) {
 	c.cs[coach].trigger = true
 }
 
-// Commit indicates the current worker is done with the shared state and ready to Commit it.
-// Commit blocks until batch is committed. The same Res and error is returned to all the workers in the batch.
-// (Res, error) is what the Multi.Commit returns.
+// Commit waits for all pending workers in the specified batch to contribute to its state.
+// It then triggers the Multi's Committer function once for that batch with the complete state
+// and returns the resulting shared value to all waiting workers in that batch.
 func (c *Multi[Res]) Commit(ctx context.Context, coach int) (Res, error) {
 	return commit(ctx, &c.lock, &c.cs[coach], nil, func(ctx context.Context) (Res, error) {
-		return c.CommitFunc(ctx, coach)
+		return c.Committer(ctx, coach)
 	})
 }
 
-// Cancel indicates the current worker is done with shared data but it mustn't be committed.
-// All the workers from the same batch receive zero Res and the same error.
-//
-// It can be used if batch shared state have been spoilt as a result of error or something.
+// CommitFunc for a specific batch behaves like Commit for that batch
+// but uses the provided function `f` instead of the Multi's Committer.
+// All workers participating in the same batch must consistently use
+// either Commit or CommitFunc with the same `f`.
+func (c *Multi[Res]) CommitFunc(ctx context.Context, coach int, f CommitMultiFunc[Res]) (Res, error) {
+	return commit(ctx, &c.lock, &c.cs[coach], nil, func(ctx context.Context) (Res, error) {
+		return f(ctx, coach)
+	})
+}
+
+// Cancel aborts the current batch for the specified coach and returns the provided error
+// to all workers that have already added their data to that batch.
+// The Multi's Committer is not called for this batch.
+// Workers waiting to Enter the critical section are not affected.
 func (c *Multi[Res]) Cancel(ctx context.Context, coach int, err error) (Res, error) {
 	if err == nil {
 		err = Canceled

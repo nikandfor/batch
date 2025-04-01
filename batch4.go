@@ -9,26 +9,28 @@ import (
 )
 
 type (
-	// Queue of workers going to Enter the batch.
-	// It's returned from Coordinator to worker for it to get in.
+	// Queue for workers entering the batch.
+	// Returned by the Controller to allow workers to join.
 	Queue struct {
 		c atomic.Int32
 	}
 
-	// Coordinator coordinates workers to update shared state,
-	// commit it, and deliver result to all participated workers.
-	Coordinator[Res any] struct {
-		// CommitFunc is called to commit shared state.
+	// Controller manages workers updating and committing a shared state,
+	// then delivering the result to all participating workers.
+	Controller[Res any] struct {
+		// Committer is called to commit the shared state.
 		//
-		// It's already called owning critical section. Enter-Exit cycle must not be called from it.
+		// Called within a critical section. Do not invoke other Controller methods here.
 		//
-		// Required.
-		CommitFunc func(ctx context.Context) (Res, error)
+		// Set Committer OR use Controller.CommitFunc.
+		Committer CommitFunc[Res]
 
 		lock
 
 		coach[Res]
 	}
+
+	CommitFunc[Res any] = func(ctx context.Context) (Res, error)
 
 	lock struct {
 		queue Queue
@@ -51,54 +53,52 @@ type (
 		trigger bool // Commit has been triggered by the user.
 	}
 
-	// PanicError is returned to all the workers in the batch if one panicked.
-	// The panicked worker gets panic, not an error.
+	// PanicError is returned as an error to all workers in the batch if one of the workers panicked.
+	// The worker that panicked will have the original panic value re-raised, not this error.
 	PanicError struct {
-		Panic interface{}
+		Panic any
 	}
 )
 
 // Canceled is the default error returned to workers when Cancel is called with a nil error.
 var Canceled = errors.New("batch canceled")
 
-// New creates new Coordinator.
-func New[Res any](f func(ctx context.Context) (Res, error)) *Coordinator[Res] {
-	return &Coordinator[Res]{
-		CommitFunc: f,
+// New creates a new Controller with the given commit function.
+func New[Res any](f CommitFunc[Res]) *Controller[Res] {
+	return &Controller[Res]{
+		Committer: f,
 	}
 }
 
-// Init initiates zero Coordinator.
-// It can also be used as Reset but not in parallel with its usage.
-func (c *Coordinator[Res]) Init(f func(ctx context.Context) (Res, error)) {
-	c.CommitFunc = f
+// Init initializes the Controller with the given commit function.
+// Can also be used to reset the Controller, but not concurrently with active operations.
+func (c *Controller[Res]) Init(f CommitFunc[Res]) {
+	c.Committer = f
 }
 
-// Gets the queue of waiting workers.
+// Queue returns the queue for workers waiting to enter the batch.
 //
-// Worker can leave the Queue before Enter,
-// but we must call Notify to wake up waiting workers.
-func (c *Coordinator[Res]) Queue() *Queue {
+// Workers can leave the queue before entering, but Notify must be called
+// to signal waiting workers in that case.
+func (c *Controller[Res]) Queue() *Queue {
 	return &c.lock.queue
 }
 
-// Notify wakes up waiting workers.
+// Notify unblocks waiting workers.
 //
-// Must be called if the worker left the Queue before Enter.
-func (c *Coordinator[Res]) Notify() {
+// This must be called if a worker leaves the Queue before entering the batch.
+func (c *Controller[Res]) Notify() {
 	c.cond.Broadcast()
 }
 
-// Enter enters the batch.
-// When the call returns we are in the critical section.
-// Shared resources can be used safely.
-// It's similar to Mutex.Lock.
-// Pair method Exit must be called if Enter was successful (returned value >= 0).
-// It returns index of entered worker.
-// 0 means we are the first in the batch and we should reset shared state.
-// If blocking == false and batch is not available negative value returned.
-// Enter also removes the worker from the queue.
-func (c *Coordinator[Res]) Enter(blocking bool) int {
+// Enter attempts to join the batch.
+// Returns the worker's index within the batch upon success (>= 0), entering the critical section.
+// Shared resources can be safely accessed after a successful return.
+// This is analogous to Mutex.Lock or TryLock, and must be paired with a call to Exit.
+// An index of 0 indicates this worker is the first in the batch and should initialize shared state.
+// If blocking is false and the batch is not ready, a negative value is returned.
+// Enter also removes the worker from the waiting queue.
+func (c *Controller[Res]) Enter(blocking bool) int {
 	c.mu.Lock()
 
 	q := c.queue.Out()
@@ -126,19 +126,19 @@ func (c *Coordinator[Res]) Enter(blocking bool) int {
 	return c.cnt - 1
 }
 
-// Exit exits the critical section.
-// It should be called with defer just after we successfully Entered the batch.
-// It's similar to Mutex.Unlock.
-// Returns number of workers have not Exited yet.
 // 0 means we are the last exiting the batch, state can be reset here.
 // But remember the case when worker have panicked.
-func (c *Coordinator[Res]) Exit() int {
+
+// Exit leaves the critical section.
+// Should be called with defer immediately after a successful Enter.
+// Analogous to Mutex.Unlock.
+func (c *Controller[Res]) Exit() {
 	defer func() {
 		c.mu.Unlock()
 		c.cond.Broadcast()
 	}()
 
-	return c.coach.exit()
+	c.coach.exit()
 }
 
 func (c *coach[Res]) exit() int {
@@ -169,35 +169,46 @@ func (c *coach[Res]) exit() int {
 }
 
 // Trigger batch to Commit.
-// We can call both Commit or Exit after that.
-// If we added our data to the batch or if we didn't respectively.
-// So we will be part of the batch or not.
-func (c *Coordinator[Res]) Trigger() {
+// Must be called inside Enter-Exit section.
+//
+// Can be called before or after adding data to the batch.
+// The commit is initiated when this worker calls Commit or Exit.
+// If calling Exit, the worker may get into the Queue and Enter again to retry the batch.
+func (c *Controller[Res]) Trigger() {
 	c.trigger = true
 }
 
-// Commit waits for the waiting workes to add their data to the batch,
-// calls Coordinator.Commit only once for the batch,
-// and returns the same shared result to all workers.
-func (c *Coordinator[Res]) Commit(ctx context.Context) (Res, error) {
-	return commit[Res](ctx, &c.lock, &c.coach, nil, c.CommitFunc)
+// Commit waits for all pending workers to contribute to the batch.
+// It then calls the Controller.Committer function once with the complete batch
+// and returns the resulting shared value to all waiting workers.
+func (c *Controller[Res]) Commit(ctx context.Context) (Res, error) {
+	return commit(ctx, &c.lock, &c.coach, nil, c.Committer)
 }
 
-// Cancel aborts current batch and returns the same error to all workers already added their data to the batch.
-// Coordinator.Commit is not called.
-// Waiting workers but not Entered the critical section are not affected.
-func (c *Coordinator[Res]) Cancel(ctx context.Context, err error) (Res, error) {
+// CommitFunc behaves like Commit but uses the provided function `f`
+// instead of the Controller.Committer.
+// All workers participating in the same batch must consistently use
+// either Commit or CommitFunc with the same `f`.
+func (c *Controller[Res]) CommitFunc(ctx context.Context, f CommitFunc[Res]) (_ Res, err error) {
+	return commit(ctx, &c.lock, &c.coach, nil, f)
+}
+
+// Cancel aborts the current batch and returns the provided error
+// to all workers that have already added their data to the batch.
+// Controller.Committer is not called.
+// Workers waiting to Enter the critical section are not affected.
+func (c *Controller[Res]) Cancel(ctx context.Context, err error) (Res, error) {
 	if err == nil {
 		err = Canceled
 	}
 
-	return commit[Res](ctx, &c.lock, &c.coach, err, nil)
+	return commit(ctx, &c.lock, &c.coach, err, nil)
 }
 
-func commit[Res any](ctx context.Context, c *lock, cc *coach[Res], err error, f func(ctx context.Context) (Res, error)) (Res, error) {
+func commit[Res any](ctx context.Context, c *lock, cc *coach[Res], err error, f CommitFunc[Res]) (Res, error) {
 	for {
 		if cc.cnt >= 0 && (err != nil || cc.trigger || c.queue.Len() == 0) {
-			return finalize[Res](ctx, c, cc, err, f)
+			return finalize(ctx, c, cc, err, f)
 		}
 
 		c.cond.Wait()
@@ -210,7 +221,7 @@ func commit[Res any](ctx context.Context, c *lock, cc *coach[Res], err error, f 
 	return cc.res, cc.err
 }
 
-func finalize[Res any](ctx context.Context, c *lock, cc *coach[Res], err error, f func(ctx context.Context) (Res, error)) (Res, error) {
+func finalize[Res any](ctx context.Context, c *lock, cc *coach[Res], err error, f CommitFunc[Res]) (Res, error) {
 	if cc.cnt < 0 {
 		panic("batch: inconsistent state")
 	}

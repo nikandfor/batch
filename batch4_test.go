@@ -12,14 +12,14 @@ import (
 
 var jobs = flag.Int("jobs", 5, "parallel jobs in tests")
 
-func TestCoordinatorSmoke(tb *testing.T) {
+func TestControllerSmoke(tb *testing.T) {
 	const N = 3
 	ctx := context.Background()
 
 	var sum, total int
 
-	bc := batch.Coordinator[int]{
-		CommitFunc: func(ctx context.Context) (int, error) {
+	bc := batch.Controller[int]{
+		Committer: func(ctx context.Context) (int, error) {
 			tb.Logf("commit %v", sum)
 			total += sum
 
@@ -29,16 +29,13 @@ func TestCoordinatorSmoke(tb *testing.T) {
 
 	var wg sync.WaitGroup
 
-	for j := 0; j < *jobs; j++ {
-		j := j
+	for j := range *jobs {
 		wg.Add(1)
 
 		go func() {
 			defer wg.Done()
 
-			for i := 0; i < N; i++ {
-				i := i
-
+			for i := range N {
 				func() {
 					bc.Queue().In()
 
@@ -73,14 +70,14 @@ func TestCoordinatorSmoke(tb *testing.T) {
 	}
 }
 
-func TestCoordinatorAllCases(tb *testing.T) {
+func TestControllerAllCases(tb *testing.T) {
 	ctx := context.Background()
 
 	var sum int
 	var commitPanics bool
 
-	bc := batch.Coordinator[int]{
-		CommitFunc: func(ctx context.Context) (int, error) {
+	bc := batch.Controller[int]{
+		Committer: func(ctx context.Context) (int, error) {
 			if commitPanics {
 				tb.Logf("commit PANICS")
 				panic("commit PaNiC")
@@ -95,8 +92,7 @@ func TestCoordinatorAllCases(tb *testing.T) {
 
 	var wg sync.WaitGroup
 
-	for j := 0; j < *jobs; j++ {
-		j := j
+	for j := range *jobs {
 		wg.Add(1)
 
 		go func() {
@@ -188,13 +184,13 @@ func TestCoordinatorAllCases(tb *testing.T) {
 	wg.Wait()
 }
 
-func BenchmarkCoordinator(tb *testing.B) {
+func BenchmarkController(tb *testing.B) {
 	tb.ReportAllocs()
 
 	ctx := context.Background()
 
 	var sum int
-	var bc batch.Coordinator[int]
+	var bc batch.Controller[int]
 
 	bc.Init(func(ctx context.Context) (int, error) {
 		return sum, nil
