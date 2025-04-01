@@ -16,6 +16,8 @@ No more batch operations that add its data to a batch and go away hoping it woul
 
 This is all without timeouts, additional goroutines, allocations, and channels.
 
+There is also [singleflight](./singleflight) lib in this module.
+
 ## How it works
 
 * Each worker adds its work to a shared batch.
