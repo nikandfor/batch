@@ -63,8 +63,8 @@ type (
 // Canceled is the default error returned to workers when Cancel is called with a nil error.
 var Canceled = errors.New("batch canceled")
 
-// New creates a new Controller with the given commit function.
-func New[Res any](f CommitFunc[Res]) *Controller[Res] {
+// NewController creates a new Controller with the given commit function.
+func NewController[Res any](f CommitFunc[Res]) *Controller[Res] {
 	return &Controller[Res]{
 		Committer: f,
 	}

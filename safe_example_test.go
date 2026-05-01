@@ -22,7 +22,7 @@ type (
 func NewSafeService() *SafeService {
 	s := &SafeService{}
 
-	s.bc = batch.New(s.commit)
+	s.bc = batch.NewController(s.commit)
 
 	return s
 }

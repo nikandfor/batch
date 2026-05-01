@@ -23,7 +23,7 @@ const (
 	usage = "By -> defer Exit -> [QueueIn] -> Enter -> Cancel/Commit/return"
 )
 
-func By[Res any](c *Controller[Res]) Batch[Res] {
+func MakeBatch[Res any](c *Controller[Res]) Batch[Res] {
 	return Batch[Res]{
 		c: c,
 	}

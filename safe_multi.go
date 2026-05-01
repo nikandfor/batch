@@ -13,7 +13,7 @@ type (
 	}
 )
 
-func ByMulti[Res any](c *Multi[Res]) MultiBatch[Res] {
+func MakeMultiBatch[Res any](c *Multi[Res]) MultiBatch[Res] {
 	return MultiBatch[Res]{
 		c: c,
 	}
