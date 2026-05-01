@@ -89,8 +89,7 @@ func ExampleMultiBatch() {
 	// let's spin up some workers
 	var wg sync.WaitGroup
 
-	for j := 0; j < jobs; j++ {
-		j := j
+	for j := range jobs {
 		wg.Add(1)
 
 		go func() {

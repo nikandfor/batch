@@ -14,10 +14,10 @@ jobs:
     strategy:
       matrix:
         os: ["ubuntu-latest", "macos-latest", "windows-latest"]
-        go-ver: ["1.24"]
+        go-ver: ["1.26", "1.25", "1.24"]
         include:
           - os: "ubuntu-latest"
-            go-ver: "1.24"
+            go-ver: "1.26"
             cover: true
 
     runs-on: ${{ matrix.os }}

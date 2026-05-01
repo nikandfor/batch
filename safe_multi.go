@@ -8,7 +8,7 @@ type (
 
 		coach int
 
-		noCopy noCopy //nolint:unused
+		noCopy noCopy
 		state  byte
 	}
 )

@@ -98,9 +98,7 @@ func TestControllerAllCases(tb *testing.T) {
 		go func() {
 			defer wg.Done()
 
-			for i := 0; i <= 8; i++ {
-				i := i
-
+			for i := range 9 {
 				func() {
 					if j == 1 && (i == 3 || i == 7) {
 						defer func() {

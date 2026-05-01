@@ -269,8 +269,9 @@ func (q *Queue) Len() int {
 // AsPanicError unwraps PanicError.
 func AsPanicError(err error) (PanicError, bool) {
 	var pe PanicError
+	ok := errors.As(err, &pe)
 
-	return pe, errors.As(err, &pe)
+	return pe, ok
 }
 
 func (e PanicError) Error() string {

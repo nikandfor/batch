@@ -16,7 +16,7 @@ func TestSemaphore(tb *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(*jobs)
 
-	for j := 0; j < *jobs; j++ {
+	for range *jobs {
 		go func() {
 			defer wg.Done()
 

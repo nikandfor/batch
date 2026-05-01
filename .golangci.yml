@@ -1,0 +1,136 @@
+version: "2"
+linters:
+  default: all
+  disable:
+    - dogsled
+    - embeddedstructfieldcheck
+    - err113
+    - errname
+    - exhaustive
+    - exhaustruct
+    - forcetypeassert
+    - funcorder
+    - funlen
+    - gochecknoglobals
+    - gochecknoinits
+    - godox
+    - gomodguard
+    - inamedparam
+    - iotamixing
+    - ireturn
+    - mnd
+    - nakedret
+    - nlreturn
+    - nonamedreturns
+    - paralleltest
+    - prealloc
+    - recvcheck
+    - testifylint
+    - testpackage
+    - thelper
+    - unparam
+    - varnamelen
+    - whitespace
+    - wrapcheck
+    - wsl
+    - wsl_v5
+  settings:
+    cyclop:
+      max-complexity: 30
+    depguard:
+      rules:
+        main:
+          allow:
+            - $gostd
+            - nikand.dev/go/batch
+    dupl:
+      threshold: 100
+    gocognit:
+      min-complexity: 30
+    goconst:
+      min-len: 2
+      min-occurrences: 4
+    gocritic:
+      disabled-checks:
+        - appendAssign
+        - builtinShadow
+        - commentedOutCode
+        - equalFold
+        - octalLiteral
+        - ptrToRefParam
+        - unnamedResult
+        - whyNoLint
+        - yodaStyleExpr
+      enabled-tags:
+        - experimental
+        - performance
+        - style
+    gosec:
+      excludes:
+        - G401
+        - G505
+    lll:
+      line-length: 170
+    prealloc:
+      simple: true
+      for-loops: true
+    revive:
+      rules:
+        - name: unused-parameter
+          disabled: true
+    staticcheck:
+      checks:
+        - all
+        - -QF1008
+        - -ST1012
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - lll
+          - staticcheck
+        path: benchmarks_data
+      - linters:
+          - goconst
+          - gocognit
+        path: (.*)_test\.go
+      - linters:
+          - deadcode
+          - unused
+        path: low.go
+      - linters:
+          - dupl
+        path: unmarshal\.go
+      - linters:
+          - godot
+        source: protected by mu
+      - path: (.+)\.go$
+        text: break_
+      - path: (.+)\.go$
+        text: undbg
+      - path: (.+)\.go$
+        text: flags
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+formatters:
+  enable:
+    - gofmt
+    - gofumpt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - nikand.dev/go/batch
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

@@ -26,7 +26,7 @@ multiple database replicas). However, it is not beneficial for systems where the
 commit operation is inherently serial (e.g., a single embedded database).
 
 	                    -------------------------
-	              | -> | workers ditributed      |            /--> worker0
+	              | -> | workers distributed      |            /--> worker0
 	-> worker0 -> | -> | among free coaches      | -> result  ---> worker1
 	-> worker1 -> |     -------------------------
 	-> worker2 -> |
