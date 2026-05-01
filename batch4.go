@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime"
 	"sync"
 	"sync/atomic"
 )
@@ -207,6 +208,8 @@ func (c *Controller[Res]) Cancel(ctx context.Context, err error) (Res, error) {
 
 func commit[Res any](ctx context.Context, c *lock, cc *coach[Res], err error, f CommitFunc[Res]) (Res, error) {
 	for {
+		runtime.Gosched()
+
 		if cc.cnt >= 0 && (err != nil || cc.trigger || c.queue.Len() == 0) {
 			return finalize(ctx, c, cc, err, f)
 		}
