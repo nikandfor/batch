@@ -13,13 +13,13 @@ type (
 	}
 )
 
-func MakeMultiBatch[Res any](c *Multi[Res]) MultiBatch[Res] {
+func (c *Multi[Res]) Batch() MultiBatch[Res] {
 	return MultiBatch[Res]{
 		c: c,
 	}
 }
 
-func QueueInMulti[Res any](c *Multi[Res]) MultiBatch[Res] {
+func (c *Multi[Res]) QueuInBatch() MultiBatch[Res] {
 	c.queue.In()
 
 	return MultiBatch[Res]{
