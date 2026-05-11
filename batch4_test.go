@@ -13,7 +13,7 @@ import (
 var jobs = flag.Int("jobs", 5, "parallel jobs in tests")
 
 func TestControllerSmoke(tb *testing.T) {
-	const N = 3
+	const N = 5
 	ctx := context.Background()
 
 	var sum, total int

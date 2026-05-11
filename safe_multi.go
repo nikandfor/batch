@@ -88,20 +88,24 @@ func (b *MultiBatch[Res]) CommitFunc(ctx context.Context, f CommitMultiFunc[Res]
 }
 
 func (b *MultiBatch[Res]) Exit() int {
-	idx := -1
+	return b.ExitErr(nil)
+}
 
-	switch b.state {
+func (b *MultiBatch[Res]) ExitErr(errp *error) (idx int) {
+	idx = -1
+	s := b.state
+	b.state = stateExited
+
+	switch s {
 	case stateNew:
 	case stateQueued:
 		b.c.queue.Out()
 		b.c.Notify()
 	case stateEntered, stateCommitted:
-		idx = b.c.Exit(b.coach)
+		idx = b.c.ExitErr(b.coach, errp)
 	default:
 		panic(usage)
 	}
-
-	b.state = stateExited
 
 	return idx
 }

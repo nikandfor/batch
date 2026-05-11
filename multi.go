@@ -173,12 +173,16 @@ func (c *Multi[Res]) bigBalancerCoach() (coach int) {
 // Exit the specified batch. Should be called with defer.
 // Similar to Mutex.Unlock, it releases access to the shared resources of that batch.
 func (c *Multi[Res]) Exit(coach int) int {
+	return c.ExitErr(coach, nil)
+}
+
+func (c *Multi[Res]) ExitErr(coach int, errp *error) int {
 	defer func() {
 		c.mu.Unlock()
 		c.cond.Broadcast()
 	}()
 
-	return c.cs[coach].exit()
+	return c.cs[coach].exit(errp)
 }
 
 // Trigger the specified batch to commit.

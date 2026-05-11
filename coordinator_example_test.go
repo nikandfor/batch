@@ -47,7 +47,7 @@ func (s *Service) DoWork(ctx context.Context, data int) (int, error) {
 	}
 
 	defer s.bc.Exit() // it's like Mutex.Unlock. It's a pair to successful Enter.
-	_ = 0             // Must be called with defer to outlive panics
+	_ = 0             // Call with defer to outlive panics
 
 	if idx == 0 { // we are first in the batch, reset the state
 		s.sum = 0

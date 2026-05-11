@@ -95,19 +95,27 @@ func (b *Batch[Res]) CommitFunc(ctx context.Context, f CommitFunc[Res]) (Res, er
 	return b.c.CommitFunc(ctx, f)
 }
 
-func (b *Batch[Res]) Exit() {
-	switch b.state {
+func (b *Batch[Res]) Exit() int {
+	return b.ExitErr(nil)
+}
+
+func (b *Batch[Res]) ExitErr(errp *error) (idx int) {
+	idx = -1
+	s := b.state
+	b.state = stateExited
+
+	switch s {
 	case stateNew:
 	case stateQueued:
 		b.c.queue.Out()
 		b.c.Notify()
 	case stateEntered, stateCommitted:
-		b.c.Exit()
+		idx = b.c.ExitErr(errp)
 	default:
 		panic(usage)
 	}
 
-	b.state = stateExited
+	return idx
 }
 
 func (noCopy) Lock()   {}

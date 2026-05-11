@@ -36,10 +36,11 @@ func (s *SafeService) commit(ctx context.Context) (int, error) {
 	return s.sum, nil
 }
 
-func (s *SafeService) DoWork(ctx context.Context, data int) (int, error) {
-	b := batch.QueueIn(s.bc) // making other workers to wait for us if the batch haven't beed triggered yet
-	defer b.Exit()           // it's like Mutex.Unlock, but safely works even if we didn't enter
-	_ = 0                    // Must be called with defer to outlive panics
+func (s *SafeService) DoWork(ctx context.Context, data int) (_ int, err error) {
+	b := batch.QueueIn(s.bc) // Making other workers to wait for us if the batch haven't beed triggered yet.
+	defer b.ExitErr(&err)    // It's like Mutex.Unlock, but safely works even if we didn't enter.
+	_ = 0                    // Call Exit with defer to outlive panics.
+	_ = 0                    // ExitErr automatically cancels the batch if error is returned.
 
 	_ = data // prepare data
 

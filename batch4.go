@@ -133,37 +133,43 @@ func (c *Controller[Res]) Enter(blocking bool) int {
 // Exit leaves the critical section.
 // Should be called with defer immediately after a successful Enter.
 // Analogous to Mutex.Unlock.
-func (c *Controller[Res]) Exit() {
+func (c *Controller[Res]) Exit() int {
+	return c.ExitErr(nil)
+}
+
+func (c *Controller[Res]) ExitErr(errp *error) int {
 	defer func() {
 		c.mu.Unlock()
 		c.cond.Broadcast()
 	}()
 
-	c.coach.exit()
+	return c.coach.exit(errp)
 }
 
-func (c *coach[Res]) exit() int {
+func (c *coach[Res]) exit(errp *error) int {
 	if c.cnt > 0 {
 		p := recover()
-		if p == nil { // we just left
+		if p == nil && (errp == nil || *errp == nil) { // no panic, no error
 			c.cnt--
 			return c.cnt
 		}
 
 		c.cnt = -c.cnt
-		c.err = PanicError{Panic: p}
 		c.ready = true
 
-		defer panic(p)
+		if p == nil { // error
+			c.err = *errp
+		} else {
+			c.err = PanicError{Panic: p}
+			defer panic(p)
+		}
 	}
 
 	c.cnt++
 	idx := -c.cnt
 
 	if c.cnt == 0 {
-		var zero Res
-		c.res, c.err, c.ready = zero, nil, false
-		c.trigger = false
+		*c = coach[Res]{}
 	}
 
 	return idx
@@ -208,7 +214,9 @@ func (c *Controller[Res]) Cancel(ctx context.Context, err error) (Res, error) {
 
 func commit[Res any](ctx context.Context, c *lock, cc *coach[Res], err error, f CommitFunc[Res]) (Res, error) {
 	for {
-		runtime.Gosched()
+		if cc.cnt >= 0 && (err == nil && !cc.trigger && c.queue.Len() == 0) {
+			runtime.Gosched() // give a change to others to queue in
+		}
 
 		if cc.cnt >= 0 && (err != nil || cc.trigger || c.queue.Len() == 0) {
 			return finalize(ctx, c, cc, err, f)
